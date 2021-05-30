@@ -1,3 +1,4 @@
+<a href="https://llvm.org"><img src="https://camo.githubusercontent.com/9f664323fd40e15041020c94e169f6ce5f9b9f21542159a6a9507aad218076e9/68747470733a2f2f7765622d66726f6e74656e642e78797a2f6173736574732f7376672f4c4c564d2e737667" height="150" align="right"></a>
 # The LLVM Compiler Infrastructure
 
 This directory and its sub-directories contain source code for LLVM,
