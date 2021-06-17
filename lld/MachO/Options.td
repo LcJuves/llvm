@@ -46,10 +46,20 @@ def lto_legacy_pass_manager: Flag<["--"], "lto-legacy-pass-manager">,
 def no_lto_legacy_pass_manager : Flag<["--"], "no-lto-legacy-pass-manager">,
     HelpText<"Use the new pass manager in LLVM">,
     Group<grp_lld>;
-def time_trace: Flag<["--"], "time-trace">, HelpText<"Record time trace">;
+def time_trace: Flag<["--"], "time-trace">, HelpText<"Record time trace">,
+    Group<grp_lld>;
 def time_trace_granularity_eq: Joined<["--"], "time-trace-granularity=">,
-    HelpText<"Minimum time granularity (in microseconds) traced by time profiler">;
-def time_trace_file_eq: Joined<["--"], "time-trace-file=">, HelpText<"Specify time trace output file">;
+    HelpText<"Minimum time granularity (in microseconds) traced by time profiler">,
+    Group<grp_lld>;
+def time_trace_file_eq: Joined<["--"], "time-trace-file=">,
+    HelpText<"Specify time trace output file">,
+    Group<grp_lld>;
+def deduplicate_literals: Flag<["--"], "deduplicate-literals">,
+    HelpText<"Enable literal deduplication">,
+    Group<grp_lld>;
+def print_dylib_search: Flag<["--"], "print-dylib-search">,
+    HelpText<"Print which paths lld searched when trying to find dylibs">,
+    Group<grp_lld>;
 
 // This is a complete Options.td compiled from Apple's ld(1) manpage
 // dated 2018-03-07 and cross checked with ld64 source code in repo
@@ -191,6 +201,9 @@ def ObjC : Flag<["-"], "ObjC">,
 def force_load : Separate<["-"], "force_load">,
     MetaVarName<"<path>">,
     HelpText<"Load all members static archive library at <path>">,
+    Group<grp_libs>;
+def force_load_swift_libs : Flag<["-"], "force_load_swift_libs">,
+    HelpText<"Apply -force_load to libraries listed in LC_LINKER_OPTIONS whose names start with 'swift'">,
     Group<grp_libs>;
 
 def grp_content : OptionGroup<"content">, HelpText<"ADDITIONAL CONTENT">;
@@ -1157,8 +1170,7 @@ def data_in_code_info : Flag<["-"], "data_in_code_info">,
     Flags<[HelpHidden]>,
     Group<grp_undocumented>;
 def no_data_in_code_info : Flag<["-"], "no_data_in_code_info">,
-    HelpText<"This option is undocumented in ld64">,
-    Flags<[HelpHidden]>,
+    HelpText<"Do not emit data-in-code information">,
     Group<grp_undocumented>;
 def debug_snapshot : Flag<["-"], "debug_snapshot">,
     HelpText<"This option is undocumented in ld64">,
@@ -1189,10 +1201,6 @@ def fixup_chains_section : Flag<["-"], "fixup_chains_section">,
     Flags<[HelpHidden]>,
     Group<grp_undocumented>;
 def flto_codegen_only : Flag<["-"], "flto-codegen-only">,
-    HelpText<"This option is undocumented in ld64">,
-    Flags<[HelpHidden]>,
-    Group<grp_undocumented>;
-def force_load_swift_libs : Flag<["-"], "force_load_swift_libs">,
     HelpText<"This option is undocumented in ld64">,
     Flags<[HelpHidden]>,
     Group<grp_undocumented>;
