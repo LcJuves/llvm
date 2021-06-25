@@ -676,7 +676,7 @@ LogicalResult PadTensorOpTransformationPattern::matchAndRewrite(
 
   // Initialize tensor with the pad value
   Value tmpTensor =
-      rewriter.create<linalg::FillOp>(loc, initTensor, padValue).result();
+      rewriter.create<linalg::FillOp>(loc, padValue, initTensor).result();
 
   // Copy original contents into new tensor
   // Uses linalg.generic, but could be done with tensor.insert_slice
@@ -837,8 +837,10 @@ LogicalResult ExtractSliceOfPadTensorSwapPattern::matchAndRewrite(
     } else {
       Value check = rewriter.create<CmpIOp>(
           loc, CmpIPredicate::eq, newLength, zero);
-      dynHasZeroLenCond = dynHasZeroLenCond
-          ? rewriter.create<AndOp>(loc, check, dynHasZeroLenCond) : check;
+      dynHasZeroLenCond =
+          dynHasZeroLenCond
+              ? rewriter.create<OrOp>(loc, check, dynHasZeroLenCond)
+              : check;
     }
 
     // The amount of high padding is simply the number of elements remaining,
