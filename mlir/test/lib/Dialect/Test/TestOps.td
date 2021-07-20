@@ -31,6 +31,7 @@ def Test_Dialect : Dialect {
   let hasRegionArgAttrVerify = 1;
   let hasRegionResultAttrVerify = 1;
   let hasOperationInterfaceFallback = 1;
+  let hasNonDefaultDestructor = 1;
   let dependentDialects = ["::mlir::DLTIDialect"];
 
   let extraClassDeclaration = [{
@@ -47,8 +48,6 @@ def Test_Dialect : Dialect {
       getParseOperationHook(StringRef opName) const override;
     LogicalResult printOperation(Operation *op,
                                  OpAsmPrinter &printer) const override;
-
-    ~TestDialect();
   private:
     // Storage for a custom fallback interface.
     void *fallbackEffectOpInterfaces;
@@ -580,16 +579,7 @@ def OpWithResultShapeInterfaceOp : TEST_Op<"op_with_result_shape_interface",
 
 def OpWithResultShapePerDimInterfaceOp :
     TEST_Op<"op_with_result_shape_per_dim_interface",
-        [DeclareOpInterfaceMethods<InferShapedTypeOpInterface,
-             ["reifyReturnTypeShapesPerResultDim"]>]> {
-  let arguments = (ins AnyRankedTensor:$operand1, AnyRankedTensor:$operand2);
-  let results = (outs AnyRankedTensor:$result1, AnyRankedTensor:$result2);
-}
-
-def OpWithResultShapeAndPerDimInterfaceOp :
-    TEST_Op<"op_with_result_shape_and_per_dim_interface",
-        [DeclareOpInterfaceMethods<InferShapedTypeOpInterface,
-             ["reifyReturnTypeShapes", "reifyReturnTypeShapesPerResultDim"]>]> {
+        [DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>]> {
   let arguments = (ins AnyRankedTensor:$operand1, AnyRankedTensor:$operand2);
   let results = (outs AnyRankedTensor:$result1, AnyRankedTensor:$result2);
 }

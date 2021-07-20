@@ -1002,12 +1002,12 @@ def PseudoBR : Pseudo<(outs), (ins simm21_lsb0_jal:$imm20), [(br bb:$imm20)]>,
                PseudoInstExpansion<(JAL X0, simm21_lsb0_jal:$imm20)>;
 
 let isBarrier = 1, isBranch = 1, isIndirectBranch = 1, isTerminator = 1 in
-def PseudoBRIND : Pseudo<(outs), (ins GPR:$rs1, simm12:$imm12), []>,
+def PseudoBRIND : Pseudo<(outs), (ins GPRJALR:$rs1, simm12:$imm12), []>,
                   PseudoInstExpansion<(JALR X0, GPR:$rs1, simm12:$imm12)>;
 
-def : Pat<(brind GPR:$rs1), (PseudoBRIND GPR:$rs1, 0)>;
-def : Pat<(brind (add GPR:$rs1, simm12:$imm12)),
-          (PseudoBRIND GPR:$rs1, simm12:$imm12)>;
+def : Pat<(brind GPRJALR:$rs1), (PseudoBRIND GPRJALR:$rs1, 0)>;
+def : Pat<(brind (add GPRJALR:$rs1, simm12:$imm12)),
+          (PseudoBRIND GPRJALR:$rs1, simm12:$imm12)>;
 
 // PseudoCALLReg is a generic pseudo instruction for calls which will eventually
 // expand to auipc and jalr while encoding, with any given register used as the
@@ -1039,8 +1039,8 @@ def : Pat<(riscv_sret_flag), (SRET X0, X0)>;
 def : Pat<(riscv_mret_flag), (MRET X0, X0)>;
 
 let isCall = 1, Defs = [X1] in
-def PseudoCALLIndirect : Pseudo<(outs), (ins GPR:$rs1),
-                                [(riscv_call GPR:$rs1)]>,
+def PseudoCALLIndirect : Pseudo<(outs), (ins GPRJALR:$rs1),
+                                [(riscv_call GPRJALR:$rs1)]>,
                          PseudoInstExpansion<(JALR X1, GPR:$rs1, 0)>;
 
 let isBarrier = 1, isReturn = 1, isTerminator = 1 in
@@ -1262,11 +1262,11 @@ def : Pat<(sext_inreg (sub GPR:$rs1, GPR:$rs2), i32),
           (SUBW GPR:$rs1, GPR:$rs2)>;
 def : Pat<(sext_inreg (shl GPR:$rs1, uimm5:$shamt), i32),
           (SLLIW GPR:$rs1, uimm5:$shamt)>;
-def : Pat<(i64 (srl (zexti32 (i64 GPR:$rs1)), uimm5:$shamt)),
+def : Pat<(i64 (srl (and GPR:$rs1, 0xffffffff), uimm5:$shamt)),
           (SRLIW GPR:$rs1, uimm5:$shamt)>;
 def : Pat<(i64 (srl (shl GPR:$rs1, (i64 32)), uimm6gt32:$shamt)),
           (SRLIW GPR:$rs1, (ImmSub32 uimm6gt32:$shamt))>;
-def : Pat<(i64 (sra (sexti32 (i64 GPR:$rs1)), uimm5:$shamt)),
+def : Pat<(sra (sext_inreg GPR:$rs1, i32), uimm5:$shamt),
           (SRAIW GPR:$rs1, uimm5:$shamt)>;
 def : Pat<(i64 (sra (shl GPR:$rs1, (i64 32)), uimm6gt32:$shamt)),
           (SRAIW GPR:$rs1, (ImmSub32 uimm6gt32:$shamt))>;

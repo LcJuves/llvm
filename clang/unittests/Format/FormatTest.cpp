@@ -262,6 +262,128 @@ TEST_F(FormatTest, RemovesEmptyLines) {
                    "}",
                    getGoogleStyle()));
 
+  auto CustomStyle = clang::format::getLLVMStyle();
+  CustomStyle.BreakBeforeBraces = clang::format::FormatStyle::BS_Custom;
+  CustomStyle.BraceWrapping.AfterNamespace = true;
+  CustomStyle.KeepEmptyLinesAtTheStartOfBlocks = false;
+  EXPECT_EQ("namespace N\n"
+            "{\n"
+            "\n"
+            "int i;\n"
+            "}",
+            format("namespace N\n"
+                   "{\n"
+                   "\n"
+                   "\n"
+                   "int    i;\n"
+                   "}",
+                   CustomStyle));
+  EXPECT_EQ("/* something */ namespace N\n"
+            "{\n"
+            "\n"
+            "int i;\n"
+            "}",
+            format("/* something */ namespace N {\n"
+                   "\n"
+                   "\n"
+                   "int    i;\n"
+                   "}",
+                   CustomStyle));
+  EXPECT_EQ("inline namespace N\n"
+            "{\n"
+            "\n"
+            "int i;\n"
+            "}",
+            format("inline namespace N\n"
+                   "{\n"
+                   "\n"
+                   "\n"
+                   "int    i;\n"
+                   "}",
+                   CustomStyle));
+  EXPECT_EQ("/* something */ inline namespace N\n"
+            "{\n"
+            "\n"
+            "int i;\n"
+            "}",
+            format("/* something */ inline namespace N\n"
+                   "{\n"
+                   "\n"
+                   "int    i;\n"
+                   "}",
+                   CustomStyle));
+  EXPECT_EQ("export namespace N\n"
+            "{\n"
+            "\n"
+            "int i;\n"
+            "}",
+            format("export namespace N\n"
+                   "{\n"
+                   "\n"
+                   "int    i;\n"
+                   "}",
+                   CustomStyle));
+  EXPECT_EQ("namespace a\n"
+            "{\n"
+            "namespace b\n"
+            "{\n"
+            "\n"
+            "class AA {};\n"
+            "\n"
+            "} // namespace b\n"
+            "} // namespace a\n",
+            format("namespace a\n"
+                   "{\n"
+                   "namespace b\n"
+                   "{\n"
+                   "\n"
+                   "\n"
+                   "class AA {};\n"
+                   "\n"
+                   "\n"
+                   "}\n"
+                   "}\n",
+                   CustomStyle));
+  EXPECT_EQ("namespace A /* comment */\n"
+            "{\n"
+            "class B {}\n"
+            "} // namespace A",
+            format("namespace A /* comment */ { class B {} }", CustomStyle));
+  EXPECT_EQ("namespace A\n"
+            "{ /* comment */\n"
+            "class B {}\n"
+            "} // namespace A",
+            format("namespace A {/* comment */ class B {} }", CustomStyle));
+  EXPECT_EQ("namespace A\n"
+            "{ /* comment */\n"
+            "\n"
+            "class B {}\n"
+            "\n"
+            ""
+            "} // namespace A",
+            format("namespace A { /* comment */\n"
+                   "\n"
+                   "\n"
+                   "class B {}\n"
+                   "\n"
+                   "\n"
+                   "}",
+                   CustomStyle));
+  EXPECT_EQ("namespace A /* comment */\n"
+            "{\n"
+            "\n"
+            "class B {}\n"
+            "\n"
+            "} // namespace A",
+            format("namespace A/* comment */ {\n"
+                   "\n"
+                   "\n"
+                   "class B {}\n"
+                   "\n"
+                   "\n"
+                   "}",
+                   CustomStyle));
+
   // ...but do keep inlining and removing empty lines for non-block extern "C"
   // functions.
   verifyFormat("extern \"C\" int f() { return 42; }", getGoogleStyle());
@@ -8087,6 +8209,25 @@ TEST_F(FormatTest, ReturnTypeBreakingStyle) {
                "}\n",
                Style);
 
+  Style.BreakBeforeBraces = FormatStyle::BS_Custom;
+  Style.BraceWrapping.AfterFunction = true;
+  verifyFormat("int f(i);\n" // No break here.
+               "int\n"       // Break here.
+               "f(i)\n"
+               "{\n"
+               "  return i + 1;\n"
+               "}",
+               Style);
+  verifyFormat("int f(a, b, c);\n" // No break here.
+               "int\n"             // Break here.
+               "f(a, b, c)\n"      // Break here.
+               "short a, b;\n"
+               "float c;\n"
+               "{\n"
+               "  return a + b < c;\n"
+               "}",
+               Style);
+
   Style = getGNUStyle();
 
   // Test for comments at the end of function declarations.
@@ -9291,7 +9432,7 @@ TEST_F(FormatTest, UnderstandsUsesOfStarAndAmp) {
   verifyFormat("vector<A(uint64_t) * attr> v;", TypeMacros); // multiplication
 
   FormatStyle CustomQualifier = getLLVMStyle();
-  // Add indentifers that should not be parsed as a qualifier by default.
+  // Add identifiers that should not be parsed as a qualifier by default.
   CustomQualifier.AttributeMacros.push_back("__my_qualifier");
   CustomQualifier.AttributeMacros.push_back("_My_qualifier");
   CustomQualifier.AttributeMacros.push_back("my_other_qualifier");
