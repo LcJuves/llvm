@@ -68,6 +68,8 @@ clang_target_link_libraries(ToolingTests
   clangAST
   clangASTMatchers
   clangBasic
+  clangDependencyScanning
+  clangDriver
   clangFormat
   clangFrontend
   clangLex
