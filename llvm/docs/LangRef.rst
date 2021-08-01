@@ -4779,6 +4779,8 @@ RISC-V:
 - ``f``: A 32- or 64-bit floating-point register (requires F or D extension).
 - ``r``: A 32- or 64-bit general-purpose register (depending on the platform
   ``XLEN``).
+- ``vr``: A vector register. (requires V extension).
+- ``vm``: A vector mask register. (requires V extension).
 
 Sparc:
 
@@ -5564,7 +5566,7 @@ DILocalVariable
 
 ``DILocalVariable`` nodes represent local variables in the source language. If
 the ``arg:`` field is set to non-zero, then this variable is a subprogram
-parameter, and it will be included in the ``variables:`` field of its
+parameter, and it will be included in the ``retainedNodes:`` field of its
 :ref:`DISubprogram`.
 
 .. code-block:: text
@@ -14210,7 +14212,7 @@ all types however.
 
 ::
 
-      declare float     @llvm.maxnum.f32(float  %Val0, float  %Val1l)
+      declare float     @llvm.maxnum.f32(float  %Val0, float  %Val1)
       declare double    @llvm.maxnum.f64(double %Val0, double %Val1)
       declare x86_fp80  @llvm.maxnum.f80(x86_fp80  %Val0, x86_fp80  %Val1)
       declare fp128     @llvm.maxnum.f128(fp128 %Val0, fp128 %Val1)
