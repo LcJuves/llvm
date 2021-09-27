@@ -1,4 +1,4 @@
-//===- SparsificationPass.cpp - Pass for autogen spares tensor code -------===//
+//===- SparseTensorPasses.cpp - Pass for autogen sparse tensor code -------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -99,6 +99,9 @@ struct SparseTensorConversionPass
     ConversionTarget target(*ctx);
     target.addIllegalOp<NewOp, ConvertOp, ToPointersOp, ToIndicesOp, ToValuesOp,
                         ToTensorOp>();
+    // All dynamic rules below accept new function, call, return, and dimop
+    // operations as legal output of the rewriting provided that all sparse
+    // tensor types have been fully rewritten.
     target.addDynamicallyLegalOp<FuncOp>(
         [&](FuncOp op) { return converter.isSignatureLegal(op.getType()); });
     target.addDynamicallyLegalOp<CallOp>([&](CallOp op) {
@@ -106,8 +109,16 @@ struct SparseTensorConversionPass
     });
     target.addDynamicallyLegalOp<ReturnOp>(
         [&](ReturnOp op) { return converter.isLegal(op.getOperandTypes()); });
-    target.addLegalOp<ConstantOp, tensor::CastOp, memref::BufferCastOp,
-                      memref::CastOp>();
+    target.addDynamicallyLegalOp<tensor::DimOp>([&](tensor::DimOp op) {
+      return converter.isLegal(op.getOperandTypes());
+    });
+    // The following operations and dialects may be introduced by the
+    // rewriting rules, and are therefore marked as legal.
+    target.addLegalOp<ConstantOp, tensor::CastOp, tensor::ExtractOp, CmpFOp,
+                      CmpIOp>();
+    target.addLegalDialect<scf::SCFDialect, LLVM::LLVMDialect,
+                           memref::MemRefDialect>();
+    // Populate with rules and apply rewriting rules.
     populateFuncOpTypeConversionPattern(patterns, converter);
     populateCallOpTypeConversionPattern(patterns, converter);
     populateSparseTensorConversionPatterns(converter, patterns);

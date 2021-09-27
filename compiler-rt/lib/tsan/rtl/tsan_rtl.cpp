@@ -36,6 +36,11 @@ extern "C" void __tsan_resume() {
 
 namespace __tsan {
 
+#if !SANITIZER_GO
+void (*on_initialize)(void);
+int (*on_finalize)(int);
+#endif
+
 #if !SANITIZER_GO && !SANITIZER_MAC
 __attribute__((tls_model("initial-exec")))
 THREADLOCAL char cur_thread_placeholder[sizeof(ThreadState)] ALIGNED(64);
@@ -52,17 +57,16 @@ void OnInitialize();
 SANITIZER_WEAK_CXX_DEFAULT_IMPL
 bool OnFinalize(bool failed) {
 #if !SANITIZER_GO
-  if (auto *ptr = dlsym(RTLD_DEFAULT, "__tsan_on_finalize"))
-    return reinterpret_cast<decltype(&__tsan_on_finalize)>(ptr)(failed);
+  if (on_finalize)
+    return on_finalize(failed);
 #endif
   return failed;
 }
 SANITIZER_WEAK_CXX_DEFAULT_IMPL
 void OnInitialize() {
 #if !SANITIZER_GO
-  if (auto *ptr = dlsym(RTLD_DEFAULT, "__tsan_on_initialize")) {
-    return reinterpret_cast<decltype(&__tsan_on_initialize)>(ptr)();
-  }
+  if (on_initialize)
+    on_initialize();
 #endif
 }
 #endif
@@ -86,8 +90,8 @@ static ThreadContextBase *CreateThreadContext(Tid tid) {
     ReleaseMemoryPagesToOS(hdr_end, hdr + sizeof(Trace));
     uptr unused = hdr + sizeof(Trace) - hdr_end;
     if (hdr_end != (uptr)MmapFixedNoAccess(hdr_end, unused)) {
-      Report("ThreadSanitizer: failed to mprotect(%p, %p)\n",
-          hdr_end, unused);
+      Report("ThreadSanitizer: failed to mprotect [0x%zx-0x%zx) \n", hdr_end,
+             unused);
       CHECK("unable to mprotect" && 0);
     }
   }
@@ -104,7 +108,6 @@ Context::Context()
     : initialized(),
       report_mtx(MutexTypeReport),
       nreported(),
-      nmissed_expected(),
       thread_registry(CreateThreadContext, kMaxTid, kThreadQuarantineSize,
                       kMaxTidReuse),
       racy_mtx(MutexTypeRacy),
@@ -145,13 +148,35 @@ ThreadState::ThreadState(Context *ctx, Tid tid, int unique_id, u64 epoch,
 }
 
 #if !SANITIZER_GO
-static void MemoryProfiler(Context *ctx, fd_t fd, int i) {
-  uptr n_threads;
-  uptr n_running_threads;
-  ctx->thread_registry.GetNumberOfThreads(&n_threads, &n_running_threads);
+void MemoryProfiler(u64 uptime) {
+  if (ctx->memprof_fd == kInvalidFd)
+    return;
   InternalMmapVector<char> buf(4096);
-  WriteMemoryProfile(buf.data(), buf.size(), n_threads, n_running_threads);
-  WriteToFile(fd, buf.data(), internal_strlen(buf.data()));
+  WriteMemoryProfile(buf.data(), buf.size(), uptime);
+  WriteToFile(ctx->memprof_fd, buf.data(), internal_strlen(buf.data()));
+}
+
+void InitializeMemoryProfiler() {
+  ctx->memprof_fd = kInvalidFd;
+  const char *fname = flags()->profile_memory;
+  if (!fname || !fname[0])
+    return;
+  if (internal_strcmp(fname, "stdout") == 0) {
+    ctx->memprof_fd = 1;
+  } else if (internal_strcmp(fname, "stderr") == 0) {
+    ctx->memprof_fd = 2;
+  } else {
+    InternalScopedString filename;
+    filename.append("%s.%d", fname, (int)internal_getpid());
+    ctx->memprof_fd = OpenFile(filename.data(), WrOnly);
+    if (ctx->memprof_fd == kInvalidFd) {
+      Printf("ThreadSanitizer: failed to open memory profile file '%s'\n",
+             filename.data());
+      return;
+    }
+  }
+  MemoryProfiler(0);
+  MaybeSpawnBackgroundThread();
 }
 
 static void *BackgroundThread(void *arg) {
@@ -162,25 +187,7 @@ static void *BackgroundThread(void *arg) {
   cur_thread_init();
   cur_thread()->ignore_interceptors++;
   const u64 kMs2Ns = 1000 * 1000;
-
-  fd_t mprof_fd = kInvalidFd;
-  if (flags()->profile_memory && flags()->profile_memory[0]) {
-    if (internal_strcmp(flags()->profile_memory, "stdout") == 0) {
-      mprof_fd = 1;
-    } else if (internal_strcmp(flags()->profile_memory, "stderr") == 0) {
-      mprof_fd = 2;
-    } else {
-      InternalScopedString filename;
-      filename.append("%s.%d", flags()->profile_memory, (int)internal_getpid());
-      fd_t fd = OpenFile(filename.data(), WrOnly);
-      if (fd == kInvalidFd) {
-        Printf("ThreadSanitizer: failed to open memory profile file '%s'\n",
-               filename.data());
-      } else {
-        mprof_fd = fd;
-      }
-    }
-  }
+  const u64 start = NanoTime();
 
   u64 last_flush = NanoTime();
   uptr last_rss = 0;
@@ -198,7 +205,6 @@ static void *BackgroundThread(void *arg) {
         last_flush = NanoTime();
       }
     }
-    // GetRSS can be expensive on huge programs, so don't do it every 100ms.
     if (flags()->memory_limit_mb > 0) {
       uptr rss = GetRSS();
       uptr limit = uptr(flags()->memory_limit_mb) << 20;
@@ -214,9 +220,7 @@ static void *BackgroundThread(void *arg) {
       last_rss = rss;
     }
 
-    // Write memory profile if requested.
-    if (mprof_fd != kInvalidFd)
-      MemoryProfiler(ctx, mprof_fd, i);
+    MemoryProfiler(now - start);
 
     // Flush symbolizer cache if requested.
     if (flags()->flush_symbolizer_ms > 0) {
@@ -285,7 +289,7 @@ void MapShadow(uptr addr, uptr size) {
                                  "meta shadow"))
       Die();
   } else {
-    // Mapping continous heap.
+    // Mapping continuous heap.
     // Windows wants 64K alignment.
     meta_begin = RoundDownTo(meta_begin, 64 << 10);
     meta_end = RoundUpTo(meta_end, 64 << 10);
@@ -298,18 +302,18 @@ void MapShadow(uptr addr, uptr size) {
       Die();
     mapped_meta_end = meta_end;
   }
-  VPrintf(2, "mapped meta shadow for (%p-%p) at (%p-%p)\n",
-      addr, addr+size, meta_begin, meta_end);
+  VPrintf(2, "mapped meta shadow for (0x%zx-0x%zx) at (0x%zx-0x%zx)\n", addr,
+          addr + size, meta_begin, meta_end);
 }
 
 void MapThreadTrace(uptr addr, uptr size, const char *name) {
-  DPrintf("#0: Mapping trace at %p-%p(0x%zx)\n", addr, addr + size, size);
+  DPrintf("#0: Mapping trace at 0x%zx-0x%zx(0x%zx)\n", addr, addr + size, size);
   CHECK_GE(addr, TraceMemBeg());
   CHECK_LE(addr + size, TraceMemEnd());
   CHECK_EQ(addr, addr & ~((64 << 10) - 1));  // windows wants 64K alignment
   if (!MmapFixedSuperNoReserve(addr, size, name)) {
-    Printf("FATAL: ThreadSanitizer can not mmap thread trace (%p/%p)\n",
-        addr, size);
+    Printf("FATAL: ThreadSanitizer can not mmap thread trace (0x%zx/0x%zx)\n",
+           addr, size);
     Die();
   }
 }
@@ -402,6 +406,7 @@ void Initialize(ThreadState *thr) {
 
 #if !SANITIZER_GO
   Symbolizer::LateInitialize();
+  InitializeMemoryProfiler();
 #endif
 
   if (flags()->stop_on_start) {
@@ -456,12 +461,6 @@ int Finalize(ThreadState *thr) {
 #else
     Printf("Found %d data race(s)\n", ctx->nreported);
 #endif
-  }
-
-  if (ctx->nmissed_expected) {
-    failed = true;
-    Printf("ThreadSanitizer: missed %d expected races\n",
-        ctx->nmissed_expected);
   }
 
   if (common_flags()->print_suppressions)
@@ -554,6 +553,188 @@ StackID CurrentStackId(ThreadState *thr, uptr pc) {
     thr->shadow_stack_pos--;
   return id;
 }
+
+namespace v3 {
+
+ALWAYS_INLINE USED bool TryTraceMemoryAccess(ThreadState *thr, uptr pc,
+                                             uptr addr, uptr size,
+                                             AccessType typ) {
+  DCHECK(size == 1 || size == 2 || size == 4 || size == 8);
+  if (!kCollectHistory)
+    return true;
+  EventAccess *ev;
+  if (UNLIKELY(!TraceAcquire(thr, &ev)))
+    return false;
+  u64 size_log = size == 1 ? 0 : size == 2 ? 1 : size == 4 ? 2 : 3;
+  uptr pc_delta = pc - thr->trace_prev_pc + (1 << (EventAccess::kPCBits - 1));
+  thr->trace_prev_pc = pc;
+  if (LIKELY(pc_delta < (1 << EventAccess::kPCBits))) {
+    ev->is_access = 1;
+    ev->is_read = !!(typ & kAccessRead);
+    ev->is_atomic = !!(typ & kAccessAtomic);
+    ev->size_log = size_log;
+    ev->pc_delta = pc_delta;
+    DCHECK_EQ(ev->pc_delta, pc_delta);
+    ev->addr = CompressAddr(addr);
+    TraceRelease(thr, ev);
+    return true;
+  }
+  auto *evex = reinterpret_cast<EventAccessExt *>(ev);
+  evex->is_access = 0;
+  evex->is_func = 0;
+  evex->type = EventType::kAccessExt;
+  evex->is_read = !!(typ & kAccessRead);
+  evex->is_atomic = !!(typ & kAccessAtomic);
+  evex->size_log = size_log;
+  evex->addr = CompressAddr(addr);
+  evex->pc = pc;
+  TraceRelease(thr, evex);
+  return true;
+}
+
+ALWAYS_INLINE USED bool TryTraceMemoryAccessRange(ThreadState *thr, uptr pc,
+                                                  uptr addr, uptr size,
+                                                  AccessType typ) {
+  if (!kCollectHistory)
+    return true;
+  EventAccessRange *ev;
+  if (UNLIKELY(!TraceAcquire(thr, &ev)))
+    return false;
+  thr->trace_prev_pc = pc;
+  ev->is_access = 0;
+  ev->is_func = 0;
+  ev->type = EventType::kAccessRange;
+  ev->is_read = !!(typ & kAccessRead);
+  ev->is_free = !!(typ & kAccessFree);
+  ev->size_lo = size;
+  ev->pc = CompressAddr(pc);
+  ev->addr = CompressAddr(addr);
+  ev->size_hi = size >> EventAccessRange::kSizeLoBits;
+  TraceRelease(thr, ev);
+  return true;
+}
+
+void TraceMemoryAccessRange(ThreadState *thr, uptr pc, uptr addr, uptr size,
+                            AccessType typ) {
+  if (LIKELY(TryTraceMemoryAccessRange(thr, pc, addr, size, typ)))
+    return;
+  TraceSwitchPart(thr);
+  UNUSED bool res = TryTraceMemoryAccessRange(thr, pc, addr, size, typ);
+  DCHECK(res);
+}
+
+void TraceFunc(ThreadState *thr, uptr pc) {
+  if (LIKELY(TryTraceFunc(thr, pc)))
+    return;
+  TraceSwitchPart(thr);
+  UNUSED bool res = TryTraceFunc(thr, pc);
+  DCHECK(res);
+}
+
+void TraceMutexLock(ThreadState *thr, EventType type, uptr pc, uptr addr,
+                    StackID stk) {
+  DCHECK(type == EventType::kLock || type == EventType::kRLock);
+  if (!kCollectHistory)
+    return;
+  EventLock ev;
+  ev.is_access = 0;
+  ev.is_func = 0;
+  ev.type = type;
+  ev.pc = CompressAddr(pc);
+  ev.stack_lo = stk;
+  ev.stack_hi = stk >> EventLock::kStackIDLoBits;
+  ev._ = 0;
+  ev.addr = CompressAddr(addr);
+  TraceEvent(thr, ev);
+}
+
+void TraceMutexUnlock(ThreadState *thr, uptr addr) {
+  if (!kCollectHistory)
+    return;
+  EventUnlock ev;
+  ev.is_access = 0;
+  ev.is_func = 0;
+  ev.type = EventType::kUnlock;
+  ev._ = 0;
+  ev.addr = CompressAddr(addr);
+  TraceEvent(thr, ev);
+}
+
+void TraceTime(ThreadState *thr) {
+  if (!kCollectHistory)
+    return;
+  EventTime ev;
+  ev.is_access = 0;
+  ev.is_func = 0;
+  ev.type = EventType::kTime;
+  ev.sid = static_cast<u64>(thr->sid);
+  ev.epoch = static_cast<u64>(thr->epoch);
+  ev._ = 0;
+  TraceEvent(thr, ev);
+}
+
+NOINLINE
+void TraceSwitchPart(ThreadState *thr) {
+  Trace *trace = &thr->tctx->trace;
+  Event *pos = reinterpret_cast<Event *>(atomic_load_relaxed(&thr->trace_pos));
+  DCHECK_EQ(reinterpret_cast<uptr>(pos + 1) & TracePart::kAlignment, 0);
+  auto *part = trace->parts.Back();
+  DPrintf("TraceSwitchPart part=%p pos=%p\n", part, pos);
+  if (part) {
+    // We can get here when we still have space in the current trace part.
+    // The fast-path check in TraceAcquire has false positives in the middle of
+    // the part. Check if we are indeed at the end of the current part or not,
+    // and fill any gaps with NopEvent's.
+    Event *end = &part->events[TracePart::kSize];
+    DCHECK_GE(pos, &part->events[0]);
+    DCHECK_LE(pos, end);
+    if (pos + 1 < end) {
+      if ((reinterpret_cast<uptr>(pos) & TracePart::kAlignment) ==
+          TracePart::kAlignment)
+        *pos++ = NopEvent;
+      *pos++ = NopEvent;
+      DCHECK_LE(pos + 2, end);
+      atomic_store_relaxed(&thr->trace_pos, reinterpret_cast<uptr>(pos));
+      // Ensure we setup trace so that the next TraceAcquire
+      // won't detect trace part end.
+      Event *ev;
+      CHECK(TraceAcquire(thr, &ev));
+      return;
+    }
+    // We are indeed at the end.
+    for (; pos < end; pos++) *pos = NopEvent;
+  }
+#if !SANITIZER_GO
+  if (ctx->after_multithreaded_fork) {
+    // We just need to survive till exec.
+    CHECK(part);
+    atomic_store_relaxed(&thr->trace_pos,
+                         reinterpret_cast<uptr>(&part->events[0]));
+    return;
+  }
+#endif
+  part = new (MmapOrDie(sizeof(TracePart), "TracePart")) TracePart();
+  part->trace = trace;
+  thr->trace_prev_pc = 0;
+  {
+    Lock lock(&trace->mtx);
+    trace->parts.PushBack(part);
+    atomic_store_relaxed(&thr->trace_pos,
+                         reinterpret_cast<uptr>(&part->events[0]));
+  }
+  // Make this part self-sufficient by restoring the current stack
+  // and mutex set in the beginning of the trace.
+  TraceTime(thr);
+  for (uptr *pos = &thr->shadow_stack[0]; pos < thr->shadow_stack_pos; pos++)
+    CHECK(TryTraceFunc(thr, *pos));
+  for (uptr i = 0; i < thr->mset.Size(); i++) {
+    MutexSet::Desc d = thr->mset.Get(i);
+    TraceMutexLock(thr, d.write ? EventType::kLock : EventType::kRLock, 0,
+                   d.addr, d.stack_id);
+  }
+}
+
+}  // namespace v3
 
 void TraceSwitch(ThreadState *thr) {
 #if !SANITIZER_GO

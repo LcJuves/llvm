@@ -375,9 +375,9 @@ EXTERN void __kmpc_end_critical(kmp_Ident *loc, int32_t global_tid,
 EXTERN void __kmpc_flush(kmp_Ident *loc);
 
 // vote
-EXTERN __kmpc_impl_lanemask_t __kmpc_warp_active_thread_mask();
+EXTERN uint64_t __kmpc_warp_active_thread_mask(void);
 // syncwarp
-EXTERN void __kmpc_syncwarp(__kmpc_impl_lanemask_t);
+EXTERN void __kmpc_syncwarp(uint64_t);
 
 // tasks
 EXTERN kmp_TaskDescr *__kmpc_omp_task_alloc(kmp_Ident *loc, uint32_t global_tid,
@@ -416,11 +416,11 @@ EXTERN int32_t __kmpc_cancel(kmp_Ident *loc, int32_t global_tid,
                              int32_t cancelVal);
 
 // non standard
-EXTERN int32_t __kmpc_target_init(ident_t *Ident, bool IsSPMD,
-                                 bool UseGenericStateMachine,
-                           bool RequiresFullRuntime);
-EXTERN void __kmpc_target_deinit(ident_t *Ident, bool IsSPMD,
-                           bool RequiresFullRuntime);
+EXTERN int32_t __kmpc_target_init(ident_t *Ident, int8_t Mode,
+                                  bool UseGenericStateMachine,
+                                  bool RequiresFullRuntime);
+EXTERN void __kmpc_target_deinit(ident_t *Ident, int8_t Mode,
+                                 bool RequiresFullRuntime);
 EXTERN void __kmpc_kernel_prepare_parallel(void *WorkFn);
 EXTERN bool __kmpc_kernel_parallel(void **WorkFn);
 EXTERN void __kmpc_kernel_end_parallel();

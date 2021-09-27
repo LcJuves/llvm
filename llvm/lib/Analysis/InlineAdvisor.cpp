@@ -57,7 +57,7 @@ void DefaultInlineAdvice::recordUnsuccessfulInliningImpl(
   ORE.emit([&]() {
     return OptimizationRemarkMissed(DEBUG_TYPE, "NotInlined", DLoc, Block)
            << "'" << NV("Callee", Callee) << "' is not inlined into '"
-           << "'" << NV("Caller", Caller)
+           << NV("Caller", Caller)
            << "': " << NV("Reason", Result.getFailureReason());
   });
 }
@@ -313,7 +313,7 @@ void llvm::setInlineRemark(CallBase &CB, StringRef Message) {
     return;
 
   Attribute Attr = Attribute::get(CB.getContext(), "inline-remark", Message);
-  CB.addAttribute(AttributeList::FunctionIndex, Attr);
+  CB.addFnAttr(Attr);
 }
 
 /// Return the cost only if the inliner should attempt to inline at the given

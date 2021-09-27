@@ -206,6 +206,77 @@ InstructionCost X86TTIImpl::getArithmeticInstrCost(
   int ISD = TLI->InstructionOpcodeToISD(Opcode);
   assert(ISD && "Invalid opcode");
 
+  if (ISD == ISD::MUL && Args.size() == 2 && LT.second.isVector() &&
+      LT.second.getScalarType() == MVT::i32) {
+    // Check if the operands can be represented as a smaller datatype.
+    bool Op1Signed = false, Op2Signed = false;
+    unsigned Op1MinSize = BaseT::minRequiredElementSize(Args[0], Op1Signed);
+    unsigned Op2MinSize = BaseT::minRequiredElementSize(Args[1], Op2Signed);
+    unsigned OpMinSize = std::max(Op1MinSize, Op2MinSize);
+
+    // If both are representable as i15 and at least one is constant,
+    // zero-extended, or sign-extended from vXi16 then we can treat this as
+    // PMADDWD which has the same costs as a vXi16 multiply.
+    if (OpMinSize <= 15 && !ST->isPMADDWDSlow()) {
+      bool Op1Constant =
+          isa<ConstantDataVector>(Args[0]) || isa<ConstantVector>(Args[0]);
+      bool Op2Constant =
+          isa<ConstantDataVector>(Args[1]) || isa<ConstantVector>(Args[1]);
+      bool Op1Sext16 = isa<SExtInst>(Args[0]) && Op1MinSize == 15;
+      bool Op2Sext16 = isa<SExtInst>(Args[1]) && Op2MinSize == 15;
+
+      bool IsZeroExtended = !Op1Signed || !Op2Signed;
+      bool IsConstant = Op1Constant || Op2Constant;
+      bool IsSext16 = Op1Sext16 || Op2Sext16;
+      if (IsConstant || IsZeroExtended || IsSext16)
+        LT.second =
+            MVT::getVectorVT(MVT::i16, 2 * LT.second.getVectorNumElements());
+    }
+  }
+
+  if ((ISD == ISD::SDIV || ISD == ISD::SREM || ISD == ISD::UDIV ||
+       ISD == ISD::UREM) &&
+      (Op2Info == TargetTransformInfo::OK_UniformConstantValue ||
+       Op2Info == TargetTransformInfo::OK_NonUniformConstantValue) &&
+      Opd2PropInfo == TargetTransformInfo::OP_PowerOf2) {
+    if (ISD == ISD::SDIV || ISD == ISD::SREM) {
+      // On X86, vector signed division by constants power-of-two are
+      // normally expanded to the sequence SRA + SRL + ADD + SRA.
+      // The OperandValue properties may not be the same as that of the previous
+      // operation; conservatively assume OP_None.
+      InstructionCost Cost =
+          2 * getArithmeticInstrCost(Instruction::AShr, Ty, CostKind, Op1Info,
+                                     Op2Info, TargetTransformInfo::OP_None,
+                                     TargetTransformInfo::OP_None);
+      Cost += getArithmeticInstrCost(Instruction::LShr, Ty, CostKind, Op1Info,
+                                     Op2Info, TargetTransformInfo::OP_None,
+                                     TargetTransformInfo::OP_None);
+      Cost += getArithmeticInstrCost(Instruction::Add, Ty, CostKind, Op1Info,
+                                     Op2Info, TargetTransformInfo::OP_None,
+                                     TargetTransformInfo::OP_None);
+
+      if (ISD == ISD::SREM) {
+        // For SREM: (X % C) is the equivalent of (X - (X/C)*C)
+        Cost += getArithmeticInstrCost(Instruction::Mul, Ty, CostKind, Op1Info,
+                                       Op2Info);
+        Cost += getArithmeticInstrCost(Instruction::Sub, Ty, CostKind, Op1Info,
+                                       Op2Info);
+      }
+
+      return Cost;
+    }
+
+    // Vector unsigned division/remainder will be simplified to shifts/masks.
+    if (ISD == ISD::UDIV)
+      return getArithmeticInstrCost(Instruction::LShr, Ty, CostKind, Op1Info,
+                                    Op2Info, TargetTransformInfo::OP_None,
+                                    TargetTransformInfo::OP_None);
+    // UREM
+    return getArithmeticInstrCost(Instruction::And, Ty, CostKind, Op1Info,
+                                  Op2Info, TargetTransformInfo::OP_None,
+                                  TargetTransformInfo::OP_None);
+  }
+
   static const CostTblEntry GLMCostTable[] = {
     { ISD::FDIV,  MVT::f32,   18 }, // divss
     { ISD::FDIV,  MVT::v4f32, 35 }, // divps
@@ -244,6 +315,7 @@ InstructionCost X86TTIImpl::getArithmeticInstrCost(
   if (ST->isSLM()) {
     if (Args.size() == 2 && ISD == ISD::MUL && LT.second == MVT::v4i32) {
       // Check if the operands can be shrinked into a smaller datatype.
+      // TODO: Merge this into generiic vXi32 MUL patterns above.
       bool Op1Signed = false;
       unsigned Op1MinSize = BaseT::minRequiredElementSize(Args[0], Op1Signed);
       bool Op2Signed = false;
@@ -266,54 +338,6 @@ InstructionCost X86TTIImpl::getArithmeticInstrCost(
                                             LT.second)) {
       return LT.first * Entry->Cost;
     }
-  }
-
-  if ((ISD == ISD::SDIV || ISD == ISD::SREM || ISD == ISD::UDIV ||
-       ISD == ISD::UREM) &&
-      (Op2Info == TargetTransformInfo::OK_UniformConstantValue ||
-       Op2Info == TargetTransformInfo::OK_NonUniformConstantValue) &&
-      Opd2PropInfo == TargetTransformInfo::OP_PowerOf2) {
-    if (ISD == ISD::SDIV || ISD == ISD::SREM) {
-      // On X86, vector signed division by constants power-of-two are
-      // normally expanded to the sequence SRA + SRL + ADD + SRA.
-      // The OperandValue properties may not be the same as that of the previous
-      // operation; conservatively assume OP_None.
-      InstructionCost Cost =
-          2 * getArithmeticInstrCost(Instruction::AShr, Ty, CostKind, Op1Info,
-                                     Op2Info, TargetTransformInfo::OP_None,
-                                     TargetTransformInfo::OP_None);
-      Cost += getArithmeticInstrCost(Instruction::LShr, Ty, CostKind, Op1Info,
-                                     Op2Info,
-                                     TargetTransformInfo::OP_None,
-                                     TargetTransformInfo::OP_None);
-      Cost += getArithmeticInstrCost(Instruction::Add, Ty, CostKind, Op1Info,
-                                     Op2Info,
-                                     TargetTransformInfo::OP_None,
-                                     TargetTransformInfo::OP_None);
-
-      if (ISD == ISD::SREM) {
-        // For SREM: (X % C) is the equivalent of (X - (X/C)*C)
-        Cost += getArithmeticInstrCost(Instruction::Mul, Ty, CostKind, Op1Info,
-                                       Op2Info);
-        Cost += getArithmeticInstrCost(Instruction::Sub, Ty, CostKind, Op1Info,
-                                       Op2Info);
-      }
-
-      return Cost;
-    }
-
-    // Vector unsigned division/remainder will be simplified to shifts/masks.
-    if (ISD == ISD::UDIV)
-      return getArithmeticInstrCost(Instruction::LShr, Ty, CostKind,
-                                    Op1Info, Op2Info,
-                                    TargetTransformInfo::OP_None,
-                                    TargetTransformInfo::OP_None);
-
-    else // UREM
-      return getArithmeticInstrCost(Instruction::And, Ty, CostKind,
-                                    Op1Info, Op2Info,
-                                    TargetTransformInfo::OP_None,
-                                    TargetTransformInfo::OP_None);
   }
 
   static const CostTblEntry AVX512BWUniformConstCostTable[] = {
@@ -1005,6 +1029,7 @@ InstructionCost X86TTIImpl::getArithmeticInstrCost(
   static const CostTblEntry X64CostTbl[] = { // 64-bit targets
     { ISD::ADD,  MVT::i64,    1 }, // Core (Merom) from http://www.agner.org/
     { ISD::SUB,  MVT::i64,    1 }, // Core (Merom) from http://www.agner.org/
+    { ISD::MUL,  MVT::i64,    2 }, // Nehalem from http://www.agner.org/
   };
 
   if (ST->is64Bit())
@@ -1915,6 +1940,8 @@ InstructionCost X86TTIImpl::getCastInstrCost(unsigned Opcode, Type *Dst,
 
     { ISD::TRUNCATE,    MVT::v8i1,   MVT::v8i32,  2 },
 
+    { ISD::TRUNCATE,    MVT::v16i16, MVT::v16i32, 4 },
+    { ISD::TRUNCATE,    MVT::v16i8,  MVT::v16i32, 4 },
     { ISD::TRUNCATE,    MVT::v16i8,  MVT::v8i16,  1 },
     { ISD::TRUNCATE,    MVT::v16i8,  MVT::v4i32,  1 },
     { ISD::TRUNCATE,    MVT::v16i8,  MVT::v2i64,  1 },
@@ -1990,6 +2017,8 @@ InstructionCost X86TTIImpl::getCastInstrCost(unsigned Opcode, Type *Dst,
     { ISD::TRUNCATE,    MVT::v8i1,   MVT::v8i64,  9 },
     { ISD::TRUNCATE,    MVT::v16i1,  MVT::v16i64, 11 },
 
+    { ISD::TRUNCATE,    MVT::v16i16, MVT::v16i32, 6 },
+    { ISD::TRUNCATE,    MVT::v16i8,  MVT::v16i32, 6 },
     { ISD::TRUNCATE,    MVT::v16i8,  MVT::v16i16, 2 }, // and+extract+packuswb
     { ISD::TRUNCATE,    MVT::v16i8,  MVT::v8i32,  5 },
     { ISD::TRUNCATE,    MVT::v8i16,  MVT::v8i32,  5 },
@@ -2582,6 +2611,22 @@ X86TTIImpl::getTypeBasedIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
 
   // TODO: Overflow intrinsics (*ADDO, *SUBO, *MULO) with vector types are not
   //       specialized in these tables yet.
+  static const CostTblEntry AVX512BITALGCostTbl[] = {
+    { ISD::CTPOP,      MVT::v32i16,  1 },
+    { ISD::CTPOP,      MVT::v64i8,   1 },
+    { ISD::CTPOP,      MVT::v16i16,  1 },
+    { ISD::CTPOP,      MVT::v32i8,   1 },
+    { ISD::CTPOP,      MVT::v8i16,   1 },
+    { ISD::CTPOP,      MVT::v16i8,   1 },
+  };
+  static const CostTblEntry AVX512VPOPCNTDQCostTbl[] = {
+    { ISD::CTPOP,      MVT::v8i64,   1 },
+    { ISD::CTPOP,      MVT::v16i32,  1 },
+    { ISD::CTPOP,      MVT::v4i64,   1 },
+    { ISD::CTPOP,      MVT::v8i32,   1 },
+    { ISD::CTPOP,      MVT::v2i64,   1 },
+    { ISD::CTPOP,      MVT::v4i32,   1 },
+  };
   static const CostTblEntry AVX512CDCostTbl[] = {
     { ISD::CTLZ,       MVT::v8i64,   1 },
     { ISD::CTLZ,       MVT::v16i32,  1 },
@@ -2599,10 +2644,10 @@ X86TTIImpl::getTypeBasedIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
   static const CostTblEntry AVX512BWCostTbl[] = {
     { ISD::ABS,        MVT::v32i16,  1 },
     { ISD::ABS,        MVT::v64i8,   1 },
-    { ISD::BITREVERSE, MVT::v8i64,   5 },
-    { ISD::BITREVERSE, MVT::v16i32,  5 },
-    { ISD::BITREVERSE, MVT::v32i16,  5 },
-    { ISD::BITREVERSE, MVT::v64i8,   5 },
+    { ISD::BITREVERSE, MVT::v8i64,   3 },
+    { ISD::BITREVERSE, MVT::v16i32,  3 },
+    { ISD::BITREVERSE, MVT::v32i16,  3 },
+    { ISD::BITREVERSE, MVT::v64i8,   2 },
     { ISD::BSWAP,      MVT::v8i64,   1 },
     { ISD::BSWAP,      MVT::v16i32,  1 },
     { ISD::BSWAP,      MVT::v32i16,  1 },
@@ -2729,25 +2774,41 @@ X86TTIImpl::getTypeBasedIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
     { ISD::ABS,        MVT::v8i32,   1 },
     { ISD::ABS,        MVT::v16i16,  1 },
     { ISD::ABS,        MVT::v32i8,   1 },
-    { ISD::BITREVERSE, MVT::v4i64,   5 },
-    { ISD::BITREVERSE, MVT::v8i32,   5 },
-    { ISD::BITREVERSE, MVT::v16i16,  5 },
-    { ISD::BITREVERSE, MVT::v32i8,   5 },
+    { ISD::BITREVERSE, MVT::v2i64,   3 },
+    { ISD::BITREVERSE, MVT::v4i64,   3 },
+    { ISD::BITREVERSE, MVT::v4i32,   3 },
+    { ISD::BITREVERSE, MVT::v8i32,   3 },
+    { ISD::BITREVERSE, MVT::v8i16,   3 },
+    { ISD::BITREVERSE, MVT::v16i16,  3 },
+    { ISD::BITREVERSE, MVT::v16i8,   3 },
+    { ISD::BITREVERSE, MVT::v32i8,   3 },
     { ISD::BSWAP,      MVT::v4i64,   1 },
     { ISD::BSWAP,      MVT::v8i32,   1 },
     { ISD::BSWAP,      MVT::v16i16,  1 },
-    { ISD::CTLZ,       MVT::v4i64,  23 },
-    { ISD::CTLZ,       MVT::v8i32,  18 },
-    { ISD::CTLZ,       MVT::v16i16, 14 },
-    { ISD::CTLZ,       MVT::v32i8,   9 },
-    { ISD::CTPOP,      MVT::v4i64,   7 },
-    { ISD::CTPOP,      MVT::v8i32,  11 },
-    { ISD::CTPOP,      MVT::v16i16,  9 },
-    { ISD::CTPOP,      MVT::v32i8,   6 },
-    { ISD::CTTZ,       MVT::v4i64,  10 },
-    { ISD::CTTZ,       MVT::v8i32,  14 },
-    { ISD::CTTZ,       MVT::v16i16, 12 },
-    { ISD::CTTZ,       MVT::v32i8,   9 },
+    { ISD::CTLZ,       MVT::v2i64,   7 },
+    { ISD::CTLZ,       MVT::v4i64,   7 },
+    { ISD::CTLZ,       MVT::v4i32,   5 },
+    { ISD::CTLZ,       MVT::v8i32,   5 },
+    { ISD::CTLZ,       MVT::v8i16,   4 },
+    { ISD::CTLZ,       MVT::v16i16,  4 },
+    { ISD::CTLZ,       MVT::v16i8,   3 },
+    { ISD::CTLZ,       MVT::v32i8,   3 },
+    { ISD::CTPOP,      MVT::v2i64,   3 },
+    { ISD::CTPOP,      MVT::v4i64,   3 },
+    { ISD::CTPOP,      MVT::v4i32,   7 },
+    { ISD::CTPOP,      MVT::v8i32,   7 },
+    { ISD::CTPOP,      MVT::v8i16,   3 },
+    { ISD::CTPOP,      MVT::v16i16,  3 },
+    { ISD::CTPOP,      MVT::v16i8,   2 },
+    { ISD::CTPOP,      MVT::v32i8,   2 },
+    { ISD::CTTZ,       MVT::v2i64,   4 },
+    { ISD::CTTZ,       MVT::v4i64,   4 },
+    { ISD::CTTZ,       MVT::v4i32,   7 },
+    { ISD::CTTZ,       MVT::v8i32,   7 },
+    { ISD::CTTZ,       MVT::v8i16,   4 },
+    { ISD::CTTZ,       MVT::v16i16,  4 },
+    { ISD::CTTZ,       MVT::v16i8,   3 },
+    { ISD::CTTZ,       MVT::v32i8,   3 },
     { ISD::SADDSAT,    MVT::v16i16,  1 },
     { ISD::SADDSAT,    MVT::v32i8,   1 },
     { ISD::SMAX,       MVT::v8i32,   1 },
@@ -3121,6 +3182,14 @@ X86TTIImpl::getTypeBasedIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
 
     if (ST->isSLM())
       if (const auto *Entry = CostTableLookup(SLMCostTbl, ISD, MTy))
+        return adjustTableCost(*Entry, LT.first, ICA.getFlags());
+
+    if (ST->hasBITALG())
+      if (const auto *Entry = CostTableLookup(AVX512BITALGCostTbl, ISD, MTy))
+        return adjustTableCost(*Entry, LT.first, ICA.getFlags());
+
+    if (ST->hasVPOPCNTDQ())
+      if (const auto *Entry = CostTableLookup(AVX512VPOPCNTDQCostTbl, ISD, MTy))
         return adjustTableCost(*Entry, LT.first, ICA.getFlags());
 
     if (ST->hasCDI())
@@ -3703,7 +3772,7 @@ X86TTIImpl::getMaskedMemoryOpCost(unsigned Opcode, Type *SrcTy, Align Alignment,
   if ((IsLoad && !isLegalMaskedLoad(SrcVTy, Alignment)) ||
       (IsStore && !isLegalMaskedStore(SrcVTy, Alignment))) {
     // Scalarization
-    APInt DemandedElts = APInt::getAllOnesValue(NumElem);
+    APInt DemandedElts = APInt::getAllOnes(NumElem);
     InstructionCost MaskSplitCost =
         getScalarizationOverhead(MaskTy, DemandedElts, false, true);
     InstructionCost ScalarCompareCost = getCmpSelInstrCost(
@@ -4616,7 +4685,7 @@ InstructionCost X86TTIImpl::getGSScalarCost(unsigned Opcode, Type *SrcVTy,
                                             bool VariableMask, Align Alignment,
                                             unsigned AddressSpace) {
   unsigned VF = cast<FixedVectorType>(SrcVTy)->getNumElements();
-  APInt DemandedElts = APInt::getAllOnesValue(VF);
+  APInt DemandedElts = APInt::getAllOnes(VF);
   TTI::TargetCostKind CostKind = TTI::TCK_RecipThroughput;
 
   InstructionCost MaskUnpackCost = 0;
@@ -4761,7 +4830,7 @@ bool X86TTIImpl::isLegalNTStore(Type *DataType, Align Alignment) {
   // loads require AVX2).
   if (DataSize == 32)
     return ST->hasAVX();
-  else if (DataSize == 16)
+  if (DataSize == 16)
     return ST->hasSSE1();
   return true;
 }
@@ -4994,6 +5063,8 @@ InstructionCost X86TTIImpl::getInterleavedMemoryOpCostAVX2(
   // The cost of the loads/stores is accounted for separately.
   //
   static const CostTblEntry AVX2InterleavedLoadTbl[] = {
+      {2, MVT::v2i16, 2}, // (load 4i16 and) deinterleave into 2 x 2i16
+
       {2, MVT::v4i64, 6}, // (load 8i64 and) deinterleave into 2 x 4i64
 
       {3, MVT::v2i8, 10},  // (load 6i8 and) deinterleave into 3 x 2i8
@@ -5014,6 +5085,8 @@ InstructionCost X86TTIImpl::getInterleavedMemoryOpCostAVX2(
   };
 
   static const CostTblEntry AVX2InterleavedStoreTbl[] = {
+      {2, MVT::v2i16, 1}, // interleave 2 x 2i16 into 4i16 (and store)
+
       {2, MVT::v4i64, 6}, // interleave 2 x 4i64 into 8i64 (and store)
 
       {3, MVT::v2i8, 7},   // interleave 3 x 2i8 into 6i8 (and store)

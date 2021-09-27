@@ -4114,7 +4114,7 @@ Sema::ActOnMemInitializer(Decl *ConstructorD,
 namespace {
 
 // Callback to only accept typo corrections that can be a valid C++ member
-// intializer: either a non-static field member or a base class.
+// initializer: either a non-static field member or a base class.
 class MemInitializerValidatorCCC final : public CorrectionCandidateCallback {
 public:
   explicit MemInitializerValidatorCCC(CXXRecordDecl *ClassDecl)
@@ -4437,9 +4437,9 @@ Sema::BuildDelegatingInitializer(TypeSourceInfo *TInfo, Expr *Init,
   ExprResult DelegationInit = InitSeq.Perform(*this, DelegationEntity, Kind,
                                               Args, nullptr);
   if (!DelegationInit.isInvalid()) {
-    assert(DelegationInit.get()->containsErrors() ||
-           cast<CXXConstructExpr>(DelegationInit.get())->getConstructor() &&
-               "Delegating constructor with no target?");
+    assert((DelegationInit.get()->containsErrors() ||
+            cast<CXXConstructExpr>(DelegationInit.get())->getConstructor()) &&
+           "Delegating constructor with no target?");
 
     // C++11 [class.base.init]p7:
     //   The initialization of each base and member constitutes a
@@ -6004,6 +6004,15 @@ static void ReferenceDllExportedMembers(Sema &S, CXXRecordDecl *Class) {
       // .. except for certain kinds of template specializations.
       if (TSK == TSK_ImplicitInstantiation && !ClassAttr->isInherited())
         continue;
+
+      // If this is an MS ABI dllexport default constructor, instantiate any
+      // default arguments.
+      if (S.Context.getTargetInfo().getCXXABI().isMicrosoft()) {
+        auto *CD = dyn_cast<CXXConstructorDecl>(MD);
+        if (CD && CD->isDefaultConstructor() && TSK == TSK_Undeclared) {
+          S.InstantiateDefaultCtorDefaultArgs(CD);
+        }
+      }
 
       S.MarkFunctionReferenced(Class->getLocation(), MD);
 
@@ -7795,9 +7804,21 @@ private:
            DCK == DefaultedComparisonKind::Relational) &&
           !Best->RewriteKind) {
         if (Diagnose == ExplainDeleted) {
-          S.Diag(Best->Function->getLocation(),
-                 diag::note_defaulted_comparison_not_rewritten_callee)
-              << FD;
+          if (Best->Function) {
+            S.Diag(Best->Function->getLocation(),
+                   diag::note_defaulted_comparison_not_rewritten_callee)
+                << FD;
+          } else {
+            assert(Best->Conversions.size() == 2 &&
+                   Best->Conversions[0].isUserDefined() &&
+                   "non-user-defined conversion from class to built-in "
+                   "comparison");
+            S.Diag(Best->Conversions[0]
+                       .UserDefined.FoundConversionFunction.getDecl()
+                       ->getLocation(),
+                   diag::note_defaulted_comparison_not_rewritten_conversion)
+                << FD;
+          }
         }
         return Result::deleted();
       }
@@ -7953,7 +7974,7 @@ private:
 
       if (Diagnose == ExplainDeleted) {
         S.Diag(Subobj.Loc, diag::note_defaulted_comparison_no_viable_function)
-            << FD << Subobj.Kind << Subobj.Decl;
+            << FD << (OO == OO_ExclaimEqual) << Subobj.Kind << Subobj.Decl;
 
         // For a three-way comparison, list both the candidates for the
         // original operator and the candidates for the synthesized operator.
@@ -9802,7 +9823,7 @@ public:
 };
 } // end anonymous namespace
 
-/// Add the most overriden methods from MD to Methods
+/// Add the most overridden methods from MD to Methods
 static void AddMostOverridenMethods(const CXXMethodDecl *MD,
                         llvm::SmallPtrSetImpl<const CXXMethodDecl *>& Methods) {
   if (MD->size_overridden_methods() == 0)
@@ -15291,8 +15312,17 @@ Sema::BuildCXXConstructExpr(SourceLocation ConstructLoc, QualType DeclInitType,
   //       can be omitted by constructing the temporary object
   //       directly into the target of the omitted copy/move
   if (ConstructKind == CXXConstructExpr::CK_Complete && Constructor &&
+      // FIXME: Converting constructors should also be accepted.
+      // But to fix this, the logic that digs down into a CXXConstructExpr
+      // to find the source object needs to handle it.
+      // Right now it assumes the source object is passed directly as the
+      // first argument.
       Constructor->isCopyOrMoveConstructor() && hasOneRealArgument(ExprArgs)) {
     Expr *SubExpr = ExprArgs[0];
+    // FIXME: Per above, this is also incorrect if we want to accept
+    //        converting constructors, as isTemporaryObject will
+    //        reject temporaries with different type from the
+    //        CXXRecord itself.
     Elidable = SubExpr->isTemporaryObject(
         Context, cast<CXXRecordDecl>(FoundDecl->getDeclContext()));
   }
@@ -15430,7 +15460,7 @@ ExprResult Sema::BuildCXXDefaultInitExpr(SourceLocation Loc, FieldDecl *Field) {
 void Sema::FinalizeVarWithDestructor(VarDecl *VD, const RecordType *Record) {
   if (VD->isInvalidDecl()) return;
   // If initializing the variable failed, don't also diagnose problems with
-  // the desctructor, they're likely related.
+  // the destructor, they're likely related.
   if (VD->getInit() && VD->getInit()->containsErrors())
     return;
 
@@ -16836,10 +16866,7 @@ NamedDecl *Sema::ActOnFriendFunctionDecl(Scope *S, Declarator &D,
     while (DC->isRecord())
       DC = DC->getParent();
 
-    DeclContext *LookupDC = DC;
-    while (LookupDC->isTransparentContext())
-      LookupDC = LookupDC->getParent();
-
+    DeclContext *LookupDC = DC->getNonTransparentContext();
     while (true) {
       LookupQualifiedName(Previous, LookupDC);
 

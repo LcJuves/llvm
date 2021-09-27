@@ -56,7 +56,8 @@ Improvements to Clang's diagnostics
 Non-comprehensive list of changes in this release
 -------------------------------------------------
 
-- ...
+- Maximum _ExtInt size was decreased from 16,777,215 bits to 8,388,608 bits.
+  Motivation for this was discussed in PR51829.
 
 New Compiler Flags
 ------------------
@@ -71,7 +72,16 @@ Deprecated Compiler Flags
 Modified Compiler Flags
 -----------------------
 
-- ...
+- Support has been added for the following processors (``-mcpu`` identifiers in parentheses):
+
+  - RISC-V SiFive E20 (``sifive-e20``).
+  - RISC-V SiFive E21 (``sifive-e21``).
+  - RISC-V SiFive E24 (``sifive-e24``).
+  - RISC-V SiFive E34 (``sifive-e34``).
+  - RISC-V SiFive S21 (``sifive-s21``).
+  - RISC-V SiFive S51 (``sifive-s51``).
+  - RISC-V SiFive S54 (``sifive-s54``).
+  - RISC-V SiFive S76 (``sifive-s76``).
 
 Removed Compiler Flags
 -------------------------
@@ -86,15 +96,31 @@ New Pragmas in Clang
 Attribute Changes in Clang
 --------------------------
 
-- ...
+- Attributes loaded as clang plugins which are sensitive to LangOpts must
+  now override ``acceptsLangOpts`` instead of ``diagLangOpts``.
+  Returning false will produce a generic "attribute ignored" diagnostic, as
+  with clang's built-in attributes.
+  If plugins want to provide richer diagnostics, they can do so when the
+  attribute is handled instead, e.g. in ``handleDeclAttribute``.
+  (This was changed in order to better support attributes in code completion).
 
 Windows Support
 ---------------
 
+- An MSVC compatibility workaround for C++ operator names was removed. As a
+  result, the ``<query.h>`` Windows SDK header may not compile out of the box.
+  Users should use a recent SDK and pass ``-DQUERY_H_RESTRICTION_PERMISSIVE``
+  or pass ``/permissive`` to disable C++ operator names altogether. See
+  `PR42427 <https://llvm.org/pr42427>` for more info.
+
 C Language Changes in Clang
 ---------------------------
 
-- ...
+- Wide multi-characters literals such as ``L'ab'`` that would previously be interpreted as ``L'b'``
+  are now ill-formed in all language modes. The motivation for this change is outlined in
+  `P2362 <wg21.link/P2362>`_.
+- Support for ``__attribute__((error("")))`` and
+  ``__attribute__((warning("")))`` function attributes have been added.
 
 C++ Language Changes in Clang
 -----------------------------
@@ -108,6 +134,12 @@ C++20 Feature Support
 C++2b Feature Support
 ^^^^^^^^^^^^^^^^^^^^^
 ...
+
+CUDA Language Changes in Clang
+------------------------------
+
+- Clang now supports CUDA versions up to 11.4.
+- Default GPU architecture has been changed from sm_20 to sm_35.
 
 Objective-C Language Changes in Clang
 -------------------------------------
@@ -123,7 +155,8 @@ ABI Changes in Clang
 OpenMP Support in Clang
 -----------------------
 
-- ...
+- ``clang-nvlink-wrapper`` tool introduced to support linking of cubin files archived in an archive. See :doc:`ClangNvlinkWrapper`.
+
 
 CUDA Support in Clang
 ---------------------
@@ -155,6 +188,16 @@ clang-format
 
 - Option ``AllowShortEnumsOnASingleLine: false`` has been improved, it now
   correctly places the opening brace according to ``BraceWrapping.AfterEnum``.
+
+- Option ``QualifierAligment`` has been added in order to auto-arrange the
+  positioning of specifiers/qualifiers
+  `const` `volatile` `static` `inline` `constexpr` `restrict`
+  in variable and parameter declarations to be either ``Right`` aligned
+  or ``Left`` aligned or ``Custom`` using ``QualifierOrder``.
+
+- Option ``QualifierOrder`` has been added to allow the order
+  `const` `volatile` `static` `inline` `constexpr` `restrict`
+  to be controlled relative to the `type`.
 
 libclang
 --------

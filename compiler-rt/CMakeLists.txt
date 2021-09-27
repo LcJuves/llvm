@@ -241,6 +241,7 @@ endif()
 
 option(SANITIZER_USE_STATIC_CXX_ABI
   "Use static libc++abi." ${DEFAULT_SANITIZER_USE_STATIC_CXX_ABI})
+pythonize_bool(SANITIZER_USE_STATIC_CXX_ABI)
 
 set(DEFAULT_COMPILER_RT_USE_BUILTINS_LIBRARY OFF)
 if (FUCHSIA)
@@ -378,7 +379,7 @@ if (NOT MSVC)
 
   # Build with optimization, unless we're in debug mode.
   if(COMPILER_RT_DEBUG)
-    list(APPEND SANITIZER_COMMON_CFLAGS -O0)
+    list(APPEND SANITIZER_COMMON_CFLAGS -O1)
   else()
     list(APPEND SANITIZER_COMMON_CFLAGS -O3)
   endif()
@@ -438,6 +439,8 @@ endif()
 append_list_if(COMPILER_RT_HAS_WGNU_FLAG -Wno-gnu SANITIZER_COMMON_CFLAGS)
 append_list_if(COMPILER_RT_HAS_WVARIADIC_MACROS_FLAG -Wno-variadic-macros SANITIZER_COMMON_CFLAGS)
 append_list_if(COMPILER_RT_HAS_WC99_EXTENSIONS_FLAG -Wno-c99-extensions SANITIZER_COMMON_CFLAGS)
+# format-pedantic warns about passing T* for %p, which is not useful.
+append_list_if(COMPILER_RT_HAS_WNO_FORMAT_PEDANTIC -Wno-format-pedantic SANITIZER_COMMON_CFLAGS)
 append_list_if(COMPILER_RT_HAS_WD4146_FLAG /wd4146 SANITIZER_COMMON_CFLAGS)
 append_list_if(COMPILER_RT_HAS_WD4291_FLAG /wd4291 SANITIZER_COMMON_CFLAGS)
 append_list_if(COMPILER_RT_HAS_WD4391_FLAG /wd4391 SANITIZER_COMMON_CFLAGS)

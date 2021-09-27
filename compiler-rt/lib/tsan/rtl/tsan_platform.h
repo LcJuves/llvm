@@ -840,7 +840,7 @@ struct MemToShadowImpl {
     DCHECK(IsAppMemImpl::Apply<Mapping>(x));
     return (((x) & ~(Mapping::kShadowMsk | (kShadowCell - 1))) ^
             Mapping::kShadowXor) *
-               kShadowCnt +
+               kShadowMultiplier +
            Mapping::kShadowAdd;
   }
 };
@@ -873,7 +873,8 @@ struct ShadowToMemImpl {
     // a bijection, so we try to restore the address as belonging to
     // low/mid/high range consecutively and see if shadow->app->shadow mapping
     // gives us the same address.
-    uptr p = ((sp - Mapping::kShadowAdd) / kShadowCnt) ^ Mapping::kShadowXor;
+    uptr p =
+        ((sp - Mapping::kShadowAdd) / kShadowMultiplier) ^ Mapping::kShadowXor;
     if (p >= Mapping::kLoAppMemBeg && p < Mapping::kLoAppMemEnd &&
         MemToShadowImpl::Apply<Mapping>(p) == sp)
       return p;
@@ -970,7 +971,7 @@ void InitializePlatformEarly();
 void CheckAndProtect();
 void InitializeShadowMemoryPlatform();
 void FlushShadowMemory();
-void WriteMemoryProfile(char *buf, uptr buf_size, uptr nthread, uptr nlive);
+void WriteMemoryProfile(char *buf, uptr buf_size, u64 uptime_ns);
 int ExtractResolvFDs(void *state, int *fds, int nfd);
 int ExtractRecvmsgFDs(void *msg, int *fds, int nfd);
 uptr ExtractLongJmpSp(uptr *env);

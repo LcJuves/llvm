@@ -70,10 +70,8 @@ void DiagnosticInfoInlineAsm::print(DiagnosticPrinter &DP) const {
 }
 
 void DiagnosticInfoResourceLimit::print(DiagnosticPrinter &DP) const {
-  DP << getResourceName() << " (" << getResourceSize() << ") exceeds limit";
-  if (getResourceLimit() != 0)
-    DP << " (" << getResourceLimit() << ')';
-  DP << " in function '" << getFunction() << '\'';
+  DP << getResourceName() << " (" << getResourceSize() << ") exceeds limit ("
+     << getResourceLimit() << ") in function '" << getFunction() << '\'';
 }
 
 void DiagnosticInfoDebugMetadataVersion::print(DiagnosticPrinter &DP) const {
@@ -401,3 +399,7 @@ std::string DiagnosticInfoOptimizationBase::getMsg() const {
 
 void OptimizationRemarkAnalysisFPCommute::anchor() {}
 void OptimizationRemarkAnalysisAliasing::anchor() {}
+
+void DiagnosticInfoDontCall::print(DiagnosticPrinter &DP) const {
+  DP << "call to " << getFunctionName() << " marked \"dontcall\"";
+}

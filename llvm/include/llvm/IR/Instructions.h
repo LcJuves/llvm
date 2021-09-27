@@ -1685,9 +1685,7 @@ public:
 
   /// Return true if the call can return twice
   bool canReturnTwice() const { return hasFnAttr(Attribute::ReturnsTwice); }
-  void setCanReturnTwice() {
-    addAttribute(AttributeList::FunctionIndex, Attribute::ReturnsTwice);
-  }
+  void setCanReturnTwice() { addFnAttr(Attribute::ReturnsTwice); }
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
   static bool classof(const Instruction *I) {
@@ -2019,6 +2017,14 @@ protected:
   ShuffleVectorInst *cloneImpl() const;
 
 public:
+  ShuffleVectorInst(Value *V1, Value *Mask, const Twine &NameStr = "",
+                    Instruction *InsertBefore = nullptr);
+  ShuffleVectorInst(Value *V1, Value *Mask, const Twine &NameStr,
+                    BasicBlock *InsertAtEnd);
+  ShuffleVectorInst(Value *V1, ArrayRef<int> Mask, const Twine &NameStr = "",
+                    Instruction *InsertBefore = nullptr);
+  ShuffleVectorInst(Value *V1, ArrayRef<int> Mask, const Twine &NameStr,
+                    BasicBlock *InsertAtEnd);
   ShuffleVectorInst(Value *V1, Value *V2, Value *Mask,
                     const Twine &NameStr = "",
                     Instruction *InsertBefor = nullptr);

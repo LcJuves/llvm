@@ -246,7 +246,7 @@ mlir::FunctionType fir::CallOp::getFunctionType() {
 static void printCallOp(mlir::OpAsmPrinter &p, fir::CallOp &op) {
   auto callee = op.callee();
   bool isDirect = callee.hasValue();
-  p << op.getOperationName() << ' ';
+  p << ' ';
   if (isDirect)
     p << callee.getValue();
   else
@@ -299,28 +299,12 @@ static mlir::ParseResult parseCallOp(mlir::OpAsmParser &parser,
 }
 
 //===----------------------------------------------------------------------===//
-// CmpfOp
+// CmpOp
 //===----------------------------------------------------------------------===//
-
-// Note: getCmpFPredicateNames() is inline static in StandardOps/IR/Ops.cpp
-mlir::CmpFPredicate fir::CmpfOp::getPredicateByName(llvm::StringRef name) {
-  auto pred = mlir::symbolizeCmpFPredicate(name);
-  assert(pred.hasValue() && "invalid predicate name");
-  return pred.getValue();
-}
-
-void fir::buildCmpFOp(OpBuilder &builder, OperationState &result,
-                      CmpFPredicate predicate, Value lhs, Value rhs) {
-  result.addOperands({lhs, rhs});
-  result.types.push_back(builder.getI1Type());
-  result.addAttribute(
-      CmpfOp::getPredicateAttrName(),
-      builder.getI64IntegerAttr(static_cast<int64_t>(predicate)));
-}
 
 template <typename OPTY>
 static void printCmpOp(OpAsmPrinter &p, OPTY op) {
-  p << op.getOperationName() << ' ';
+  p << ' ';
   auto predSym = mlir::symbolizeCmpFPredicate(
       op->template getAttrOfType<mlir::IntegerAttr>(
             OPTY::getPredicateAttrName())
@@ -334,8 +318,6 @@ static void printCmpOp(OpAsmPrinter &p, OPTY op) {
                           /*elidedAttrs=*/{OPTY::getPredicateAttrName()});
   p << " : " << op.lhs().getType();
 }
-
-static void printCmpfOp(OpAsmPrinter &p, CmpfOp op) { printCmpOp(p, op); }
 
 template <typename OPTY>
 static mlir::ParseResult parseCmpOp(mlir::OpAsmParser &parser,
@@ -358,7 +340,7 @@ static mlir::ParseResult parseCmpOp(mlir::OpAsmParser &parser,
   // Rewrite string attribute to an enum value.
   llvm::StringRef predicateName =
       predicateNameAttr.cast<mlir::StringAttr>().getValue();
-  auto predicate = fir::CmpfOp::getPredicateByName(predicateName);
+  auto predicate = fir::CmpcOp::getPredicateByName(predicateName);
   auto builder = parser.getBuilder();
   mlir::Type i1Type = builder.getI1Type();
   attrs.set(OPTY::getPredicateAttrName(),
@@ -366,11 +348,6 @@ static mlir::ParseResult parseCmpOp(mlir::OpAsmParser &parser,
   result.attributes = attrs;
   result.addTypes({i1Type});
   return success();
-}
-
-mlir::ParseResult fir::parseCmpfOp(mlir::OpAsmParser &parser,
-                                   mlir::OperationState &result) {
-  return parseCmpOp<fir::CmpfOp>(parser, result);
 }
 
 //===----------------------------------------------------------------------===//
@@ -386,6 +363,12 @@ void fir::buildCmpCOp(OpBuilder &builder, OperationState &result,
       builder.getI64IntegerAttr(static_cast<int64_t>(predicate)));
 }
 
+mlir::CmpFPredicate fir::CmpcOp::getPredicateByName(llvm::StringRef name) {
+  auto pred = mlir::symbolizeCmpFPredicate(name);
+  assert(pred.hasValue() && "invalid predicate name");
+  return pred.getValue();
+}
+
 static void printCmpcOp(OpAsmPrinter &p, fir::CmpcOp op) { printCmpOp(p, op); }
 
 mlir::ParseResult fir::parseCmpcOp(mlir::OpAsmParser &parser,
@@ -398,8 +381,7 @@ mlir::ParseResult fir::parseCmpcOp(mlir::OpAsmParser &parser,
 //===----------------------------------------------------------------------===//
 
 void fir::ConvertOp::getCanonicalizationPatterns(
-    OwningRewritePatternList &results, MLIRContext *context) {
-}
+    OwningRewritePatternList &results, MLIRContext *context) {}
 
 mlir::OpFoldResult fir::ConvertOp::fold(llvm::ArrayRef<mlir::Attribute> opnds) {
   if (value().getType() == getType())
@@ -441,7 +423,7 @@ bool fir::ConvertOp::isPointerCompatible(mlir::Type ty) {
 //===----------------------------------------------------------------------===//
 
 static void print(mlir::OpAsmPrinter &p, fir::CoordinateOp op) {
-  p << op.getOperationName() << ' ' << op.ref() << ", " << op.coor();
+  p << ' ' << op.ref() << ", " << op.coor();
   p.printOptionalAttrDict(op->getAttrs(), /*elideAttrs=*/{"baseType"});
   p << " : ";
   p.printFunctionalType(op.getOperandTypes(), op->getResultTypes());
@@ -581,7 +563,7 @@ static ParseResult parseGlobalOp(OpAsmParser &parser, OperationState &result) {
                             result.attributes))
     return mlir::failure();
   result.addAttribute(mlir::SymbolTable::getSymbolAttrName(),
-                      builder.getStringAttr(nameAttr.getRootReference()));
+                      nameAttr.getRootReference());
 
   bool simpleInitializer = false;
   if (mlir::succeeded(parser.parseOptionalLParen())) {
@@ -629,7 +611,8 @@ void fir::GlobalOp::build(mlir::OpBuilder &builder, OperationState &result,
   result.addAttribute(typeAttrName(result.name), mlir::TypeAttr::get(type));
   result.addAttribute(mlir::SymbolTable::getSymbolAttrName(),
                       builder.getStringAttr(name));
-  result.addAttribute(symbolAttrName(), builder.getSymbolRefAttr(name));
+  result.addAttribute(symbolAttrName(),
+                      SymbolRefAttr::get(builder.getContext(), name));
   if (isConstant)
     result.addAttribute(constantAttrName(result.name), builder.getUnitAttr());
   if (initialVal)
@@ -919,9 +902,8 @@ static mlir::LogicalResult verify(fir::IterWhileOp op) {
 }
 
 static void print(mlir::OpAsmPrinter &p, fir::IterWhileOp op) {
-  p << fir::IterWhileOp::getOperationName() << " (" << op.getInductionVar()
-    << " = " << op.lowerBound() << " to " << op.upperBound() << " step "
-    << op.step() << ") and (";
+  p << " (" << op.getInductionVar() << " = " << op.lowerBound() << " to "
+    << op.upperBound() << " step " << op.step() << ") and (";
   assert(op.hasIterOperands());
   auto regionArgs = op.getRegionIterArgs();
   auto operands = op.getIterOperands();
@@ -1151,8 +1133,8 @@ static mlir::LogicalResult verify(fir::DoLoopOp op) {
 
 static void print(mlir::OpAsmPrinter &p, fir::DoLoopOp op) {
   bool printBlockTerminators = false;
-  p << fir::DoLoopOp::getOperationName() << ' ' << op.getInductionVar() << " = "
-    << op.lowerBound() << " to " << op.upperBound() << " step " << op.step();
+  p << ' ' << op.getInductionVar() << " = " << op.lowerBound() << " to "
+    << op.upperBound() << " step " << op.step();
   if (op.unordered())
     p << " unordered";
   if (op.hasIterOperands()) {
@@ -1330,7 +1312,7 @@ static constexpr llvm::StringRef getTargetOffsetAttr() {
 template <typename A, typename... AdditionalArgs>
 static A getSubOperands(unsigned pos, A allArgs,
                         mlir::DenseIntElementsAttr ranges,
-                        AdditionalArgs &&... additionalArgs) {
+                        AdditionalArgs &&...additionalArgs) {
   unsigned start = 0;
   for (unsigned i = 0; i < pos; ++i)
     start += (*(ranges.begin() + i)).getZExtValue();
@@ -1808,7 +1790,7 @@ static LogicalResult verify(fir::IfOp op) {
 
 static void print(mlir::OpAsmPrinter &p, fir::IfOp op) {
   bool printBlockTerminators = false;
-  p << fir::IfOp::getOperationName() << ' ' << op.condition();
+  p << ' ' << op.condition();
   if (!op.results().empty()) {
     p << " -> (" << op.getResultTypes() << ')';
     printBlockTerminators = true;
@@ -1878,7 +1860,7 @@ static void printBinaryOp(Operation *op, OpAsmPrinter &p) {
   assert(op->getNumOperands() == 2 && "binary op must have two operands");
   assert(op->getNumResults() == 1 && "binary op must have one result");
 
-  p << op->getName() << ' ' << op->getOperand(0) << ", " << op->getOperand(1);
+  p << ' ' << op->getOperand(0) << ", " << op->getOperand(1);
   p.printOptionalAttrDict(op->getAttrs());
   p << " : " << op->getResult(0).getType();
 }
@@ -1888,7 +1870,7 @@ static void printUnaryOp(Operation *op, OpAsmPrinter &p) {
   assert(op->getNumOperands() == 1 && "unary op must have one operand");
   assert(op->getNumResults() == 1 && "unary op must have one result");
 
-  p << op->getName() << ' ' << op->getOperand(0);
+  p << ' ' << op->getOperand(0);
   p.printOptionalAttrDict(op->getAttrs());
   p << " : " << op->getResult(0).getType();
 }

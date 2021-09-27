@@ -682,6 +682,9 @@ def warn_unreachable_return : Warning<
 def warn_unreachable_loop_increment : Warning<
   "loop will run at most once (loop increment never executed)">,
   InGroup<UnreachableCodeLoopIncrement>, DefaultIgnore;
+def warn_unreachable_fallthrough_attr : Warning<
+  "fallthrough annotation in unreachable code">,
+  InGroup<UnreachableCodeFallthrough>, DefaultIgnore;
 def note_unreachable_silence : Note<
   "silence by adding parentheses to mark code as explicitly dead">;
 
@@ -2959,7 +2962,7 @@ def err_attribute_requires_positive_integer : Error<
   "%0 attribute requires a %select{positive|non-negative}1 "
   "integral compile time constant expression">;
 def err_attribute_requires_opencl_version : Error<
-  "%0 attribute requires OpenCL version %1%select{| or above}2">;
+  "attribute %0 is supported in the OpenCL version %1%select{| onwards}2">;
 def err_invalid_branch_protection_spec : Error<
   "invalid or misplaced branch protection specification '%0'">;
 def warn_unsupported_target_attribute
@@ -4480,7 +4483,8 @@ def note_ovl_candidate_bad_conv_incomplete : Note<
     "; remove &}7">;
 def note_ovl_candidate_bad_list_argument : Note<
     "candidate %sub{select_ovl_candidate_kind}0,1,2 not viable: "
-    "cannot convert initializer list argument to %4">;
+    "%select{cannot convert initializer list|too few initializers in list"
+    "|too many initializers in list}7 argument to %4">;
 def note_ovl_candidate_bad_overload : Note<
     "candidate %sub{select_ovl_candidate_kind}0,1,2 not viable: "
     "no overload of %4 matching %3 for %ordinal5 argument">;
@@ -7424,7 +7428,7 @@ def note_member_first_declared_here : Note<
 def warn_bitwise_negation_bool : Warning<
   "bitwise negation of a boolean expression%select{;| always evaluates to 'true';}0 "
   "did you mean logical negation?">,
-  InGroup<DiagGroup<"bool-operation">>;
+  InGroup<BoolOperation>, DefaultIgnore;
 def err_decrement_bool : Error<"cannot decrement expression of type bool">;
 def warn_increment_bool : Warning<
   "incrementing expression of type bool is deprecated and "
@@ -8388,8 +8392,10 @@ def err_ref_bad_target_global_initializer : Error<
   "function %1 in global initializer">;
 def err_capture_bad_target : Error<
   "capture host variable %0 by reference in device or host device lambda function">;
-def err_capture_bad_target_this_ptr : Error<
-  "capture host side class data member by this pointer in device or host device lambda function">;
+def warn_maybe_capture_bad_target_this_ptr : Warning<
+  "capture host side class data member by this pointer in device or host device lambda function "
+  "may result in invalid memory access if this pointer is not accessible on device side">,
+  InGroup<DiagGroup<"gpu-maybe-wrong-side">>;
 def warn_kern_is_method : Extension<
   "kernel function %0 is a member function; this may not be accepted by nvcc">,
   InGroup<CudaCompat>;
@@ -9150,14 +9156,18 @@ def note_defaulted_comparison_calls_deleted : Note<
   "defaulted %0 is implicitly deleted because it would invoke a deleted "
   "comparison function%select{| for member %2| for base class %2}1">;
 def note_defaulted_comparison_no_viable_function : Note<
-  "defaulted %0 is implicitly deleted because there is no viable three-way "
-  "comparison function for%select{| member| base class}1 %2">;
+  "defaulted %0 is implicitly deleted because there is no viable "
+  "%select{three-way comparison function|'operator=='}1 for "
+  "%select{|member |base class }2%3">;
 def note_defaulted_comparison_no_viable_function_synthesized : Note<
   "three-way comparison cannot be synthesized because there is no viable "
   "function for %select{'=='|'<'}0 comparison">;
 def note_defaulted_comparison_not_rewritten_callee : Note<
   "defaulted %0 is implicitly deleted because this non-rewritten comparison "
   "function would be the best match for the comparison">;
+def note_defaulted_comparison_not_rewritten_conversion : Note<
+  "defaulted %0 is implicitly deleted because a builtin comparison function "
+  "using this conversion would be the best match for the comparison">;
 def note_defaulted_comparison_cannot_deduce : Note<
   "return type of defaulted 'operator<=>' cannot be deduced because "
   "return type %2 of three-way comparison for %select{|member|base class}0 %1 "
@@ -9578,9 +9588,6 @@ def err_fallthrough_attr_outside_switch : Error<
   "fallthrough annotation is outside switch statement">;
 def err_fallthrough_attr_invalid_placement : Error<
   "fallthrough annotation does not directly precede switch label">;
-def warn_fallthrough_attr_unreachable : Warning<
-  "fallthrough annotation in unreachable code">,
-  InGroup<ImplicitFallthrough>, DefaultIgnore;
 
 def warn_unreachable_default : Warning<
   "default label in switch which covers all enumeration values">,
@@ -9733,6 +9740,9 @@ def err_argument_invalid_range : Error<
 def warn_argument_invalid_range : Warning<
   "argument value %0 is outside the valid range [%1, %2]">, DefaultError,
   InGroup<DiagGroup<"argument-outside-range">>;
+def warn_argument_undefined_behaviour : Warning<
+  "argument value %0 will result in undefined behaviour">,
+  InGroup<DiagGroup<"argument-undefined-behaviour">>;
 def err_argument_not_multiple : Error<
   "argument should be a multiple of %0">;
 def err_argument_not_power_of_2 : Error<
@@ -10095,8 +10105,7 @@ def err_opencl_type_can_only_be_used_as_function_parameter : Error <
 def err_opencl_type_not_found : Error<
   "%0 type %1 not found; include the base header with -finclude-default-header">;
 def warn_opencl_attr_deprecated_ignored : Warning <
-  "%0 attribute is deprecated and ignored in OpenCL version %1">,
-  InGroup<IgnoredAttributes>;
+  "%0 attribute is deprecated and ignored in %1">, InGroup<IgnoredAttributes>;
 def err_opencl_variadic_function : Error<
   "invalid prototype, variadic arguments are not allowed in OpenCL">;
 def err_opencl_requires_extension : Error<
@@ -10161,7 +10170,7 @@ def err_opencl_builtin_expected_type : Error<
 
 // OpenCL v3.0 s6.3.7 - Vector Components
 def ext_opencl_ext_vector_type_rgba_selector: ExtWarn<
-  "vector component name '%0' is an OpenCL C version 3.0 feature">,
+  "vector component name '%0' is a feature from OpenCL version 3.0 onwards">,
   InGroup<OpenCLUnsupportedRGBA>;
 
 def err_openclcxx_placement_new : Error<
@@ -10532,6 +10541,8 @@ def err_omp_map_shared_storage : Error<
   "variable already marked as mapped in current construct">;
 def err_omp_invalid_map_type_for_directive : Error<
   "%select{map type '%1' is not allowed|map type must be specified}0 for '#pragma omp %2'">;
+def err_omp_invalid_map_type_modifier_for_directive : Error<
+  "map type modifier '%0' is not allowed for '#pragma omp %1'">;
 def err_omp_no_clause_for_directive : Error<
   "expected at least one %0 clause for '#pragma omp %1'">;
 def err_omp_threadprivate_in_clause : Error<
@@ -10783,6 +10794,8 @@ def err_omp_dispatch_statement_call
 def err_omp_unroll_full_variable_trip_count : Error<
   "loop to be fully unrolled must have a constant trip count">;
 def note_omp_directive_here : Note<"'%0' directive found here">;
+def err_omp_instantiation_not_supported
+    : Error<"instantiation of '%0' not supported yet">;
 } // end of OpenMP category
 
 let CategoryName = "Related Result Type Issue" in {
@@ -11195,8 +11208,8 @@ def err_multiversion_mismatched_attrs
             "%0 %select{is missing|has different arguments}1">;
 def err_multiversion_diff : Error<
   "multiversioned function declaration has a different %select{calling convention"
-  "|return type|constexpr specification|inline specification|storage class|"
-  "linkage}0">;
+  "|return type|constexpr specification|inline specification|linkage|"
+  "language linkage}0">;
 def err_multiversion_doesnt_support : Error<
   "attribute '%select{target|cpu_specific|cpu_dispatch}0' multiversioned functions do not "
   "yet support %select{function templates|virtual functions|"

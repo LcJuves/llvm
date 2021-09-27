@@ -405,7 +405,7 @@ class const(TensorExpression):
     return ScalarConst(self.value).expr()
 
   def __repr__(self):
-    return f"const({self.type_var}, {self.value})"
+    return f"const({self.value})"
 
 
 class index(TensorExpression):
@@ -484,7 +484,7 @@ class OpInterfaceDef:
 
 
 ContractionOpInterface = OpInterfaceDef("LinalgContractionOpInterface")
-
+ConvolutionOpInterface = OpInterfaceDef("LinalgConvolutionOpInterface")
 
 class OpMetadataDef(YAMLObject):
   """Metadata about the op (generally not behavior impacting)."""

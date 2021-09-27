@@ -25,8 +25,8 @@ include "mlir/Interfaces/SideEffectInterfaces.td"
 // first operands. These may be optionally followed by non-view operands
 // depending on the specific Linalg op.
 class LinalgStructuredBase_Op<string mnemonic, list<OpTrait> props>
-  : Op<Linalg_Dialect, mnemonic, !listconcat(props, [
-       LinalgStructuredInterface, ReifyRankedShapedTypeOpInterface])> {
+  : Op<Linalg_Dialect, mnemonic, !listconcat([
+       LinalgStructuredInterface, ReifyRankedShapedTypeOpInterface], props)> {
   code structuredOpsBaseDecls = [{
     // Return whether the op accesses the iteration indices.
     bool hasIndexSemantics() {
@@ -620,18 +620,22 @@ def GenericOp : LinalgStructuredBase_Op<"generic", [
       "ValueRange":$outputs, "ArrayRef<AffineMap>":$indexingMaps,
       "ArrayRef<StringRef>":$iteratorTypes, "StringRef":$doc,
       "StringRef":$libraryCall,
-      CArg<"function_ref<void(OpBuilder &, Location, ValueRange)>", "nullptr">)>,
+      CArg<"function_ref<void(OpBuilder &, Location, ValueRange)>", "nullptr">,
+      CArg<"ArrayRef<NamedAttribute>", "{}">:$attributes)>,
     OpBuilder<(ins "ValueRange":$inputs, "ValueRange":$outputBuffers,
       "ArrayRef<AffineMap>":$indexingMaps, "ArrayRef<StringRef>":$iteratorTypes,
       "StringRef":$doc, "StringRef":$libraryCall,
-      CArg<"function_ref<void(OpBuilder &, Location, ValueRange)>", "nullptr">)>,
+      CArg<"function_ref<void(OpBuilder &, Location, ValueRange)>", "nullptr">,
+      CArg<"ArrayRef<NamedAttribute>", "{}">:$attributes)>,
     OpBuilder<(ins "TypeRange":$resultTensorTypes, "ValueRange":$inputs,
       "ValueRange":$outputs, "ArrayRef<AffineMap>":$indexingMaps,
       "ArrayRef<StringRef>":$iteratorTypes,
-      CArg<"function_ref<void(OpBuilder &, Location, ValueRange)>", "nullptr">)>,
+      CArg<"function_ref<void(OpBuilder &, Location, ValueRange)>", "nullptr">,
+      CArg<"ArrayRef<NamedAttribute>", "{}">:$attributes)>,
     OpBuilder<(ins "ValueRange":$inputs, "ValueRange":$outputBuffers,
       "ArrayRef<AffineMap>":$indexingMaps, "ArrayRef<StringRef>":$iteratorTypes,
-      CArg<"function_ref<void(OpBuilder &, Location, ValueRange)>", "nullptr">)>
+      CArg<"function_ref<void(OpBuilder &, Location, ValueRange)>", "nullptr">,
+      CArg<"ArrayRef<NamedAttribute>", "{}">:$attributes)>
   ];
 
   let extraClassDeclaration = structuredOpsBaseDecls # [{
