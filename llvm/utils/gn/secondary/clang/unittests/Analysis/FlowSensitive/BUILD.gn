@@ -9,9 +9,16 @@ unittest("ClangAnalysisFlowSensitiveTests") {
     "//clang/lib/Analysis/FlowSensitive",
     "//clang/lib/Basic",
     "//clang/lib/Frontend",
+    "//clang/lib/Lex",
     "//clang/lib/Testing",
     "//clang/lib/Tooling",
     "//llvm/lib/Support",
+    "//llvm/lib/Testing/Support",
   ]
-  sources = [ "TypeErasedDataflowAnalysisTest.cpp" ]
+  sources = [
+    "SingleVarConstantPropagationTest.cpp",
+    "TestingSupport.cpp",
+    "TestingSupportTest.cpp",
+    "TypeErasedDataflowAnalysisTest.cpp",
+  ]
 }

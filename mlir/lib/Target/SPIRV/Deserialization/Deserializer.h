@@ -19,6 +19,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/ScopedPrinter.h"
 #include <cstdint>
 
 namespace mlir {
@@ -37,7 +38,7 @@ struct BlockMergeInfo {
   Block *mergeBlock;
   Block *continueBlock; // nullptr for spv.mlir.selection
   Location loc;
-  uint32_t control;
+  uint32_t control; // Selection/loop control
 
   BlockMergeInfo(Location location, uint32_t control)
       : mergeBlock(nullptr), continueBlock(nullptr), loc(location),
@@ -51,10 +52,7 @@ struct BlockMergeInfo {
 struct DebugLine {
   uint32_t fileID;
   uint32_t line;
-  uint32_t col;
-
-  DebugLine(uint32_t fileIDNum, uint32_t lineNum, uint32_t colNum)
-      : fileID(fileIDNum), line(lineNum), col(colNum) {}
+  uint32_t column;
 };
 
 /// Map from a selection/loop's header block to its merge (and continue) target.
@@ -350,9 +348,8 @@ private:
   //    guarantees that we enter and exit in structured ways and the construct
   //    is nestable.
   // 3. Put the new spv.mlir.selection/spv.mlir.loop op at the beginning of the
-  // old merge
-  //    block and redirect all branches to the old header block to the old
-  //    merge block (which contains the spv.mlir.selection/spv.mlir.loop op
+  //    old merge block and redirect all branches to the old header block to the
+  //    old merge block (which contains the spv.mlir.selection/spv.mlir.loop op
   //    now).
 
   /// For OpPhi instructions, we use block arguments to represent them. OpPhi
@@ -600,6 +597,11 @@ private:
 
   /// A list of all structs which have unresolved member types.
   SmallVector<DeferredStructTypeInfo, 0> deferredStructTypesInfos;
+
+#ifndef NDEBUG
+  /// A logger used to emit information during the deserialzation process.
+  llvm::ScopedPrinter logger;
+#endif
 };
 
 } // namespace spirv
