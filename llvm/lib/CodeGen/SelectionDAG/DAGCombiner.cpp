@@ -3058,9 +3058,8 @@ static SDValue combineADDCARRYDiamond(DAGCombiner &Combiner, SelectionDAG &DAG,
 //
 // Our goal is to identify A, B, and CarryIn and produce ADDCARRY/SUBCARRY with
 // a single path for carry/borrow out propagation:
-static SDValue combineCarryDiamond(DAGCombiner &Combiner, SelectionDAG &DAG,
-                                   const TargetLowering &TLI, SDValue Carry0,
-                                   SDValue Carry1, SDNode *N) {
+static SDValue combineCarryDiamond(SelectionDAG &DAG, const TargetLowering &TLI,
+                                   SDValue Carry0, SDValue Carry1, SDNode *N) {
   if (Carry0.getResNo() != 1 || Carry1.getResNo() != 1)
     return SDValue();
   unsigned Opcode = Carry0.getOpcode();
@@ -5879,7 +5878,7 @@ SDValue DAGCombiner::visitAND(SDNode *N) {
     if (SDValue Shuffle = XformToShuffleWithZero(N))
       return Shuffle;
 
-  if (SDValue Combined = combineCarryDiamond(*this, DAG, TLI, N0, N1, N))
+  if (SDValue Combined = combineCarryDiamond(DAG, TLI, N0, N1, N))
     return Combined;
 
   // fold (and (or x, C), D) -> D if (C & D) == D
@@ -6676,7 +6675,7 @@ SDValue DAGCombiner::visitOR(SDNode *N) {
   if (SDValue Combined = visitORLike(N0, N1, N))
     return Combined;
 
-  if (SDValue Combined = combineCarryDiamond(*this, DAG, TLI, N0, N1, N))
+  if (SDValue Combined = combineCarryDiamond(DAG, TLI, N0, N1, N))
     return Combined;
 
   // Recognize halfword bswaps as (bswap + rotl 16) or (bswap + shl 16)
@@ -8173,7 +8172,7 @@ SDValue DAGCombiner::visitXOR(SDNode *N) {
   if (SimplifyDemandedBits(SDValue(N, 0)))
     return SDValue(N, 0);
 
-  if (SDValue Combined = combineCarryDiamond(*this, DAG, TLI, N0, N1, N))
+  if (SDValue Combined = combineCarryDiamond(DAG, TLI, N0, N1, N))
     return Combined;
 
   return SDValue();
@@ -9375,6 +9374,17 @@ SDValue DAGCombiner::visitBSWAP(SDNode *N) {
   // fold (bswap (bswap x)) -> x
   if (N0.getOpcode() == ISD::BSWAP)
     return N0->getOperand(0);
+
+  // Canonicalize bswap(bitreverse(x)) -> bitreverse(bswap(x)). If bitreverse
+  // isn't supported, it will be expanded to bswap followed by a manual reversal
+  // of bits in each byte. By placing bswaps before bitreverse, we can remove
+  // the two bswaps if the bitreverse gets expanded.
+  if (N0.getOpcode() == ISD::BITREVERSE && N0.hasOneUse()) {
+    SDLoc DL(N);
+    SDValue BSwap = DAG.getNode(ISD::BSWAP, DL, VT, N0.getOperand(0));
+    return DAG.getNode(ISD::BITREVERSE, DL, VT, BSwap);
+  }
+
   return SDValue();
 }
 
@@ -12214,7 +12224,8 @@ SDValue DAGCombiner::reduceLoadWidth(SDNode *N) {
     // accessing any of the loaded bytes.  If the load was a zextload/extload
     // then the result of the shift+trunc is zero/undef (handled elsewhere).
     ShAmt = SRL1C->getZExtValue();
-    if (ShAmt >= LN->getMemoryVT().getSizeInBits())
+    uint64_t MemoryWidth = LN->getMemoryVT().getSizeInBits();
+    if (ShAmt >= MemoryWidth)
       return SDValue();
 
     // Because a SRL must be assumed to *need* to zero-extend the high bits
@@ -12223,13 +12234,19 @@ SDValue DAGCombiner::reduceLoadWidth(SDNode *N) {
     if (LN->getExtensionType() == ISD::SEXTLOAD)
       return SDValue();
 
-    unsigned ExtVTBits = ExtVT.getScalarSizeInBits();
-    // Is the shift amount a multiple of size of ExtVT?
-    if ((ShAmt & (ExtVTBits - 1)) != 0)
-      return SDValue();
-    // Is the load width a multiple of size of ExtVT?
-    if ((SRL.getScalarValueSizeInBits() & (ExtVTBits - 1)) != 0)
-      return SDValue();
+    // Avoid reading outside the memory accessed by the original load (could
+    // happened if we only adjust the load base pointer by ShAmt). Instead we
+    // try to narrow the load even further. The typical scenario here is:
+    //   (i64 (truncate (i96 (srl (load x), 64)))) ->
+    //     (i64 (truncate (i96 (zextload (load i32 + offset) from i32))))
+    if (ExtVT.getScalarSizeInBits() > MemoryWidth - ShAmt) {
+      // Don't replace sextload by zextload.
+      if (ExtType == ISD::SEXTLOAD)
+        return SDValue();
+      // Narrow the load.
+      ExtType = ISD::ZEXTLOAD;
+      ExtVT = EVT::getIntegerVT(*DAG.getContext(), MemoryWidth - ShAmt);
+    }
 
     // If the SRL is only used by a masking AND, we may be able to adjust
     // the ExtVT to make the AND redundant.
@@ -12241,7 +12258,7 @@ SDValue DAGCombiner::reduceLoadWidth(SDNode *N) {
         EVT MaskedVT = EVT::getIntegerVT(*DAG.getContext(),
                                          ShiftMask.countTrailingOnes());
         // If the mask is smaller, recompute the type.
-        if ((ExtVTBits > MaskedVT.getScalarSizeInBits()) &&
+        if ((ExtVT.getScalarSizeInBits() > MaskedVT.getScalarSizeInBits()) &&
             TLI.isLoadExtLegal(ExtType, SRL.getValueType(), MaskedVT))
           ExtVT = MaskedVT;
       }
@@ -18396,6 +18413,15 @@ SDValue DAGCombiner::visitSTORE(SDNode *N) {
       Value.getValueType().isInteger() &&
       (!isa<ConstantSDNode>(Value) ||
        !cast<ConstantSDNode>(Value)->isOpaque())) {
+    // Convert a truncating store of a extension into a standard store.
+    if ((Value.getOpcode() == ISD::ZERO_EXTEND ||
+         Value.getOpcode() == ISD::SIGN_EXTEND ||
+         Value.getOpcode() == ISD::ANY_EXTEND) &&
+        Value.getOperand(0).getValueType() == ST->getMemoryVT() &&
+        TLI.isOperationLegalOrCustom(ISD::STORE, ST->getMemoryVT()))
+      return DAG.getStore(Chain, SDLoc(N), Value.getOperand(0), Ptr,
+                          ST->getMemOperand());
+
     APInt TruncDemandedBits =
         APInt::getLowBitsSet(Value.getScalarValueSizeInBits(),
                              ST->getMemoryVT().getScalarSizeInBits());

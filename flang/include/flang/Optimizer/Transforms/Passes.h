@@ -35,10 +35,8 @@ std::unique_ptr<mlir::Pass> createExternalNameConversionPass();
 std::unique_ptr<mlir::Pass> createMemDataFlowOptPass();
 std::unique_ptr<mlir::Pass> createPromoteToAffinePass();
 std::unique_ptr<mlir::Pass> createMemoryAllocationPass();
-
-/// Support for inlining on FIR.
-bool canLegallyInline(mlir::Operation *op, mlir::Region *reg,
-                      mlir::BlockAndValueMapping &map);
+std::unique_ptr<mlir::Pass>
+createMemoryAllocationPass(bool dynOnHeap, std::size_t maxStackSize);
 
 // declarative passes
 #define GEN_PASS_REGISTRATION
