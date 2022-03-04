@@ -21,4 +21,16 @@ add_header_library(
     libc.include.fenv
     libc.src.__support.common
     libc.src.__support.CPP.standalone_cpp
+    libc.src.errno.__errno_location
 )
+
+add_header_library(
+  sqrt
+  HDRS
+    sqrt.h
+  DEPENDS
+    .fputil
+    libc.src.__support.FPUtil.generic.sqrt
+)
+
+add_subdirectory(generic)

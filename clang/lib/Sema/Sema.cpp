@@ -114,6 +114,9 @@ PrintingPolicy Sema::getPrintingPolicy(const ASTContext &Context,
     }
   }
 
+  // Shorten the data output if needed
+  Policy.EntireContentsOfLargeArray = false;
+
   return Policy;
 }
 
@@ -242,6 +245,15 @@ Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
   SemaPPCallbackHandler = Callbacks.get();
   PP.addPPCallbacks(std::move(Callbacks));
   SemaPPCallbackHandler->set(*this);
+  if (getLangOpts().getFPEvalMethod() == LangOptions::FEM_UnsetOnCommandLine)
+    // Use setting from TargetInfo.
+    PP.setCurrentFPEvalMethod(SourceLocation(),
+                              ctxt.getTargetInfo().getFPEvalMethod());
+  else
+    // Set initial value of __FLT_EVAL_METHOD__ from the command line.
+    PP.setCurrentFPEvalMethod(SourceLocation(),
+                              getLangOpts().getFPEvalMethod());
+  CurFPFeatures.setFPEvalMethod(PP.getCurrentFPEvalMethod());
 }
 
 // Anchor Sema's type info to this TU.
@@ -332,9 +344,12 @@ void Sema::Initialize() {
         Context.getTargetInfo().getSupportedOpenCLOpts(), getLangOpts());
     addImplicitTypedef("sampler_t", Context.OCLSamplerTy);
     addImplicitTypedef("event_t", Context.OCLEventTy);
-    if (getLangOpts().getOpenCLCompatibleVersion() >= 200) {
-      addImplicitTypedef("clk_event_t", Context.OCLClkEventTy);
-      addImplicitTypedef("queue_t", Context.OCLQueueTy);
+    auto OCLCompatibleVersion = getLangOpts().getOpenCLCompatibleVersion();
+    if (OCLCompatibleVersion >= 200) {
+      if (getLangOpts().OpenCLCPlusPlus || getLangOpts().Blocks) {
+        addImplicitTypedef("clk_event_t", Context.OCLClkEventTy);
+        addImplicitTypedef("queue_t", Context.OCLQueueTy);
+      }
       if (getLangOpts().OpenCLPipes)
         addImplicitTypedef("reserve_id_t", Context.OCLReserveIDTy);
       addImplicitTypedef("atomic_int", Context.getAtomicType(Context.IntTy));
@@ -401,7 +416,6 @@ void Sema::Initialize() {
         }
       }
     }
-
 
 #define EXT_OPAQUE_TYPE(ExtType, Id, Ext)                                      \
   if (getOpenCLOptions().isSupported(#Ext, getLangOpts())) {                   \
@@ -2554,32 +2568,36 @@ bool Sema::tryToRecoverWithCall(ExprResult &E, const PartialDiagnostic &PD,
                                 bool (*IsPlausibleResult)(QualType)) {
   SourceLocation Loc = E.get()->getExprLoc();
   SourceRange Range = E.get()->getSourceRange();
-
-  QualType ZeroArgCallTy;
   UnresolvedSet<4> Overloads;
-  if (tryExprAsCall(*E.get(), ZeroArgCallTy, Overloads) &&
-      !ZeroArgCallTy.isNull() &&
-      (!IsPlausibleResult || IsPlausibleResult(ZeroArgCallTy))) {
-    // At this point, we know E is potentially callable with 0
-    // arguments and that it returns something of a reasonable type,
-    // so we can emit a fixit and carry on pretending that E was
-    // actually a CallExpr.
-    SourceLocation ParenInsertionLoc = getLocForEndOfToken(Range.getEnd());
-    bool IsMV = IsCPUDispatchCPUSpecificMultiVersion(E.get());
-    Diag(Loc, PD) << /*zero-arg*/ 1 << IsMV << Range
-                  << (IsCallableWithAppend(E.get())
-                          ? FixItHint::CreateInsertion(ParenInsertionLoc, "()")
-                          : FixItHint());
-    if (!IsMV)
-      notePlausibleOverloads(*this, Loc, Overloads, IsPlausibleResult);
 
-    // FIXME: Try this before emitting the fixit, and suppress diagnostics
-    // while doing so.
-    E = BuildCallExpr(nullptr, E.get(), Range.getEnd(), None,
-                      Range.getEnd().getLocWithOffset(1));
-    return true;
+  // If this is a SFINAE context, don't try anything that might trigger ADL
+  // prematurely.
+  if (!isSFINAEContext()) {
+    QualType ZeroArgCallTy;
+    if (tryExprAsCall(*E.get(), ZeroArgCallTy, Overloads) &&
+        !ZeroArgCallTy.isNull() &&
+        (!IsPlausibleResult || IsPlausibleResult(ZeroArgCallTy))) {
+      // At this point, we know E is potentially callable with 0
+      // arguments and that it returns something of a reasonable type,
+      // so we can emit a fixit and carry on pretending that E was
+      // actually a CallExpr.
+      SourceLocation ParenInsertionLoc = getLocForEndOfToken(Range.getEnd());
+      bool IsMV = IsCPUDispatchCPUSpecificMultiVersion(E.get());
+      Diag(Loc, PD) << /*zero-arg*/ 1 << IsMV << Range
+                    << (IsCallableWithAppend(E.get())
+                            ? FixItHint::CreateInsertion(ParenInsertionLoc,
+                                                         "()")
+                            : FixItHint());
+      if (!IsMV)
+        notePlausibleOverloads(*this, Loc, Overloads, IsPlausibleResult);
+
+      // FIXME: Try this before emitting the fixit, and suppress diagnostics
+      // while doing so.
+      E = BuildCallExpr(nullptr, E.get(), Range.getEnd(), None,
+                        Range.getEnd().getLocWithOffset(1));
+      return true;
+    }
   }
-
   if (!ForceComplain) return false;
 
   bool IsMV = IsCPUDispatchCPUSpecificMultiVersion(E.get());
@@ -2623,4 +2641,16 @@ CapturedRegionScopeInfo *Sema::getCurCapturedRegion() {
 const llvm::MapVector<FieldDecl *, Sema::DeleteLocs> &
 Sema::getMismatchingDeleteExpressions() const {
   return DeleteExprs;
+}
+
+Sema::FPFeaturesStateRAII::FPFeaturesStateRAII(Sema &S)
+    : S(S), OldFPFeaturesState(S.CurFPFeatures),
+      OldOverrides(S.FpPragmaStack.CurrentValue),
+      OldEvalMethod(S.PP.getCurrentFPEvalMethod()),
+      OldFPPragmaLocation(S.PP.getLastFPEvalPragmaLocation()) {}
+
+Sema::FPFeaturesStateRAII::~FPFeaturesStateRAII() {
+  S.CurFPFeatures = OldFPFeaturesState;
+  S.FpPragmaStack.CurrentValue = OldOverrides;
+  S.PP.setCurrentFPEvalMethod(OldFPPragmaLocation, OldEvalMethod);
 }

@@ -13,12 +13,12 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Config/config.h"
+#include "llvm/Support/AutoConvert.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Errc.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/SmallVectorMemoryBuffer.h"
@@ -38,7 +38,7 @@ using namespace llvm;
 // MemoryBuffer implementation itself.
 //===----------------------------------------------------------------------===//
 
-MemoryBuffer::~MemoryBuffer() { }
+MemoryBuffer::~MemoryBuffer() = default;
 
 /// init - Initialize this MemoryBuffer as a reference to externally allocated
 /// memory, memory that we know is already null terminated.
@@ -533,4 +533,4 @@ MemoryBufferRef MemoryBuffer::getMemBufferRef() const {
   return MemoryBufferRef(Data, Identifier);
 }
 
-SmallVectorMemoryBuffer::~SmallVectorMemoryBuffer() {}
+SmallVectorMemoryBuffer::~SmallVectorMemoryBuffer() = default;

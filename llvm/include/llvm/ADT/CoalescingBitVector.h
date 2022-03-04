@@ -6,7 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 ///
-/// \file A bitvector that uses an IntervalMap to coalesce adjacent elements
+/// \file
+/// A bitvector that uses an IntervalMap to coalesce adjacent elements
 /// into intervals.
 ///
 //===----------------------------------------------------------------------===//
@@ -21,7 +22,6 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include <algorithm>
 #include <initializer_list>
 
 namespace llvm {

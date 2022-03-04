@@ -28,10 +28,15 @@
 // RUN:     | FileCheck %s --check-prefixes=NODWARF,CODEVIEW
 //     Explicitly request DWARF.
 // RUN: %clang -target i686-pc-windows-msvc -gdwarf -S -emit-llvm -o - %s \
-// RUN:     | FileCheck %s --check-prefixes=VER5,NOCODEVIEW
+// RUN:     | FileCheck %s --check-prefixes=VER4,NOCODEVIEW
 //     Explicitly request both.
 // RUN: %clang -target i686-pc-windows-msvc -gdwarf -gcodeview -S -emit-llvm -o - %s \
-// RUN:     | FileCheck %s --check-prefixes=VER5,CODEVIEW
+// RUN:     | FileCheck %s --check-prefixes=VER4,CODEVIEW
+
+// Check what version of dwarf is used for MinGW targets.
+// RUN: %clang -target i686-pc-windows-gnu -g -S -emit-llvm -o - %s | \
+// RUN:   FileCheck %s --check-prefixes=VER4
+
 // RUN: %clang -target powerpc-ibm-aix-xcoff -g -S -emit-llvm -o - %s | \
 // RUN:   FileCheck %s --check-prefix=VER3
 // RUN: %clang -target powerpc-ibm-aix-xcoff -gdwarf-2 -S -emit-llvm -o - %s | \

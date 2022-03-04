@@ -11,6 +11,11 @@
 
 include "mlir/Pass/PassBase.td"
 
+def ExpandOps : Pass<"memref-expand", "FuncOp"> {
+  let summary = "Legalize memref operations to be convertible to LLVM.";
+  let constructor = "mlir::memref::createExpandOpsPass()";
+}
+
 def FoldSubViewOps : Pass<"fold-memref-subview-ops"> {
   let summary = "Fold memref.subview ops into consumer load/store ops";
   let description = [{
@@ -39,7 +44,7 @@ def NormalizeMemRefs : Pass<"normalize-memrefs", "ModuleOp"> {
     contained in the op. Operations marked with the [MemRefsNormalizable]
     (https://mlir.llvm.org/docs/Traits/#memrefsnormalizable) trait are
     expected to be normalizable. Supported operations include affine
-    operations, memref.alloc, memref.dealloc, and std.return.
+    operations, memref.alloc, memref.dealloc, and func.return.
 
     Given an appropriate layout map specified in the code, this transformation
     can express tiled or linearized access to multi-dimensional data

@@ -8,8 +8,8 @@
 
 #include "PassDetail.h"
 #include "mlir/Dialect/Bufferization/Transforms/Passes.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/Pass/Pass.h"
 
@@ -24,10 +24,10 @@ static void updateFuncOp(FuncOp func,
 
   // Collect information about the results will become appended arguments.
   SmallVector<Type, 6> erasedResultTypes;
-  SmallVector<unsigned, 6> erasedResultIndices;
+  BitVector erasedResultIndices(functionType.getNumResults());
   for (const auto &resultType : llvm::enumerate(functionType.getResults())) {
     if (resultType.value().isa<BaseMemRefType>()) {
-      erasedResultIndices.push_back(resultType.index());
+      erasedResultIndices.set(resultType.index());
       erasedResultTypes.push_back(resultType.value());
     }
   }
@@ -40,9 +40,11 @@ static void updateFuncOp(FuncOp func,
   func.setType(newFunctionType);
 
   // Transfer the result attributes to arg attributes.
-  for (int i = 0, e = erasedResultTypes.size(); i < e; i++)
+  auto erasedIndicesIt = erasedResultIndices.set_bits_begin();
+  for (int i = 0, e = erasedResultTypes.size(); i < e; ++i, ++erasedIndicesIt) {
     func.setArgAttrs(functionType.getNumInputs() + i,
-                     func.getResultAttrs(erasedResultIndices[i]));
+                     func.getResultAttrs(*erasedIndicesIt));
+  }
 
   // Erase the results.
   func.eraseResults(erasedResultIndices);
@@ -60,7 +62,7 @@ static void updateFuncOp(FuncOp func,
 // out-params.
 static void updateReturnOps(FuncOp func,
                             ArrayRef<BlockArgument> appendedEntryArgs) {
-  func.walk([&](ReturnOp op) {
+  func.walk([&](func::ReturnOp op) {
     SmallVector<Value, 6> copyIntoOutParams;
     SmallVector<Value, 6> keepAsReturnOperands;
     for (Value operand : op.getOperands()) {
@@ -73,7 +75,7 @@ static void updateReturnOps(FuncOp func,
     for (auto t : llvm::zip(copyIntoOutParams, appendedEntryArgs))
       builder.create<memref::CopyOp>(op.getLoc(), std::get<0>(t),
                                      std::get<1>(t));
-    builder.create<ReturnOp>(op.getLoc(), keepAsReturnOperands);
+    builder.create<func::ReturnOp>(op.getLoc(), keepAsReturnOperands);
     op.erase();
   });
 }
@@ -82,7 +84,7 @@ static void updateReturnOps(FuncOp func,
 // temporary buffers for newly introduced out params.
 static LogicalResult updateCalls(ModuleOp module) {
   bool didFail = false;
-  module.walk([&](CallOp op) {
+  module.walk([&](func::CallOp op) {
     SmallVector<Value, 6> replaceWithNewCallResults;
     SmallVector<Value, 6> replaceWithOutParams;
     for (OpResult result : op.getResults()) {
@@ -110,8 +112,8 @@ static LogicalResult updateCalls(ModuleOp module) {
     newOperands.append(outParams.begin(), outParams.end());
     auto newResultTypes = llvm::to_vector<6>(llvm::map_range(
         replaceWithNewCallResults, [](Value v) { return v.getType(); }));
-    auto newCall = builder.create<CallOp>(op.getLoc(), op.getCalleeAttr(),
-                                          newResultTypes, newOperands);
+    auto newCall = builder.create<func::CallOp>(op.getLoc(), op.getCalleeAttr(),
+                                                newResultTypes, newOperands);
     for (auto t : llvm::zip(replaceWithNewCallResults, newCall.getResults()))
       std::get<0>(t).replaceAllUsesWith(std::get<1>(t));
     op.erase();

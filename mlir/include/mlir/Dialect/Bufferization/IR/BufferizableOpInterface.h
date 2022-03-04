@@ -27,45 +27,137 @@ class FuncOp;
 
 namespace bufferization {
 
-// TODO: from some HW description.
-static constexpr int64_t kBufferAlignments = 128;
-
 class BufferizableOpInterface;
 struct BufferizationOptions;
 class BufferizationState;
 
 /// Options for ComprehensiveBufferize.
 struct BufferizationOptions {
-  using AllocationFn = std::function<FailureOr<Value>(OpBuilder &, Location,
-                                                      MemRefType, ValueRange)>;
+  /// Allocator function: Generate a memref allocation with the given type,
+  /// dynamic extents and alignment.
+  using AllocationFn = std::function<FailureOr<Value>(
+      OpBuilder &, Location, MemRefType, ValueRange, unsigned int)>;
+  /// Deallocator function: Deallocate a buffer that was allocated with
+  /// AllocatorFn.
   using DeallocationFn =
       std::function<LogicalResult(OpBuilder &, Location, Value)>;
+  /// Memcpy function: Generate a memcpy between two buffers.
   using MemCpyFn =
       std::function<LogicalResult(OpBuilder &, Location, Value, Value)>;
 
+  /// An op filter entry. Filters can be used to specify which ops should be
+  /// processed by the bufferization.
+  struct OpFilterEntry {
+    /// If the filter function evaluates to `true`, the filter matches.
+    using FilterFn = std::function<bool(Operation *)>;
+
+    /// Filter type: A filter can either be a DENY filter or an ALLOW filter.
+    enum FilterType : int8_t { DENY = 0, ALLOW = 1 };
+
+    FilterFn fn;
+    FilterType type;
+  };
+
   BufferizationOptions();
 
-  // BufferizationOptions cannot be copied.
-  BufferizationOptions(const BufferizationOptions &other) = delete;
-
-  /// Return `true` if the op is allowed to be bufferized.
+  /// Return whether the op should be bufferized or not.
+  ///
+  /// If no filter is specified (`hasFilter` = false), every op will be
+  /// bufferized. Otherwise, an op is bufferized if:
+  ///
+  /// - At least one ALLOW filter says `true`.
+  /// - And, no DENY filter says `true`.
   bool isOpAllowed(Operation *op) const {
-    if (!dialectFilter.hasValue())
+    if (!hasFilter)
       return true;
-    return dialectFilter->contains(op->getDialect()->getNamespace());
+    bool isAllowed = false;
+    for (const OpFilterEntry &entry : opFilter) {
+      bool filterResult = entry.fn(op);
+      switch (entry.type) {
+      case OpFilterEntry::ALLOW:
+        isAllowed |= filterResult;
+        break;
+      case OpFilterEntry::DENY:
+        if (filterResult)
+          // DENY filter matches. This op is no allowed. (Even if other ALLOW
+          // filters may match.)
+          return false;
+      };
+    }
+    return isAllowed;
   }
 
-  /// Allow-list the given dialects in the dialect filter. Only ops from
-  /// allow-listed dialects will be bufferized. If no dialect is added, ops from
-  /// any dialect will be bufferized.
+  /// Allow the given dialects and activate the filter (`hasFilter`).
+  ///
+  /// This function adds one or multiple ALLOW filters.
   template <typename... DialectTs>
-  void addToDialectFilter() {
-    // The following expands a call to addToDialectFilterImpl for each dialect
+  void allowDialectInFilter() {
+    // The following expands a call to allowDialectInFilterImpl for each dialect
     // in 'DialectTs'. This magic is necessary due to a limitation in the places
     // that a parameter pack can be expanded in c++11.
     // FIXME: In c++17 this can be simplified by using 'fold expressions'.
     (void)std::initializer_list<int>{
-        0, (addToDialectFilterImpl<DialectTs>(), 0)...};
+        0, (allowDialectInFilterImpl<DialectTs>(), 0)...};
+  }
+
+  /// Allow the given dialect and activate the filter (`hasFilter`).
+  ///
+  /// This function adds an ALLOW filter.
+  void allowDialectInFilter(StringRef dialectNamespace) {
+    hasFilter = true;
+    OpFilterEntry::FilterFn filterFn = [=](Operation *op) {
+      return op->getDialect()->getNamespace() == dialectNamespace;
+    };
+    opFilter.push_back(
+        OpFilterEntry{filterFn, OpFilterEntry::FilterType::ALLOW});
+  }
+
+  /// Allow the given ops and activate the filter (`hasFilter`).
+  ///
+  /// This function adds one or multiple ALLOW filters.
+  template <typename... OpTys>
+  void allowOperationInFilter() {
+    // FIXME: In c++17 this can be simplified by using 'fold expressions'.
+    (void)std::initializer_list<int>{
+        0, (allowOperationInFilterImpl<OpTys>(), 0)...};
+  }
+
+  /// Allow the given op and activate the filter (`hasFilter`).
+  ///
+  /// This function adds an ALLOW filter.
+  void allowOperationInFilter(StringRef opName) {
+    hasFilter = true;
+    OpFilterEntry::FilterFn filterFn = [=](Operation *op) {
+      return op->getName().getStringRef() == opName;
+    };
+    allowOperationInFilter(filterFn);
+  }
+
+  /// Deny the given op and activate the filter (`hasFilter`).
+  ///
+  /// This function adds a DENY filter.
+  void denyOperationInFilter(StringRef opName) {
+    hasFilter = true;
+    OpFilterEntry::FilterFn filterFn = [=](Operation *op) {
+      return op->getName().getStringRef() == opName;
+    };
+    denyOperationInFilter(filterFn);
+  }
+
+  /// Allow ops that are matched by `fn` and activate the filter (`hasFilter`).
+  ///
+  /// This function adds an ALLOW filter.
+  void allowOperationInFilter(OpFilterEntry::FilterFn fn) {
+    hasFilter = true;
+    opFilter.push_back(OpFilterEntry{fn, OpFilterEntry::FilterType::ALLOW});
+  }
+
+  /// Deny ops that are matched by `fn` and activate the filter (`hasFilter`).
+  ///
+  /// This function adds a DENY filter.
+  void denyOperationInFilter(OpFilterEntry::FilterFn fn) {
+    hasFilter = true;
+    opFilter.push_back(OpFilterEntry{fn, OpFilterEntry::FilterType::DENY});
   }
 
   /// Try to cast the given op to BufferizableOpInterface if the op is allow
@@ -98,6 +190,10 @@ struct BufferizationOptions {
   /// Should be used only with `testAnalysisOnly = true`.
   unsigned analysisFuzzerSeed = 0;
 
+  /// Specifies whether fully dynamic layout maps should be used on ranked
+  /// MemRef types. If false, MemRef types will have no layout maps.
+  bool fullyDynamicLayoutMaps = true;
+
   /// If set to `true`, does not modify the IR apart from adding attributes (for
   /// checking the results of the analysis) and post analysis steps.
   bool testAnalysisOnly = false;
@@ -106,23 +202,43 @@ struct BufferizationOptions {
   /// For debugging only. Should be used together with `testAnalysisOnly`.
   bool printConflicts = false;
 
-  /// Only bufferize ops from dialects that are allowed-listed by the filter.
-  /// All other ops are ignored. This option controls the scope of partial
-  /// bufferization.
+  /// If set to `true`, an `getAliasingOpResult` will return the corresponding
+  /// "out"/"dest" OpOperand for every op that has the notion of an "out"/"dest"
+  /// operand. I.e., the aliasing OpOperand of the i-th tensor OpResult is
+  /// usually the i-th "out" tensor OpOperand. This is in line with
+  /// destination-passing style and the default behavior. Op interface
+  /// implementations must follow this contract to avoid surprising behavior.
   ///
-  /// Note: If no filter is specified, all ops are bufferized (as long as they
-  /// implement BufferizableOpInterface). If a filter is specified,
-  /// `allowUnknownOps` should be enabled. Otherwise, bufferization would fail
-  /// when encountering an op that is forbidden by the filter.
-  Optional<DenseSet<StringRef>> dialectFilter;
+  /// If set to `false`, BufferizableOpInterface implementations can try to be
+  /// smart and choose to alias with "in" operands or other operands. E.g., the
+  /// result of a `linalg.generic` op could bufferize in-place with an "in"
+  /// OpOperand if the corresponding "out" operand is not used within the
+  /// computation. Whether this pays off or not can be very input IR-specific.
+  bool alwaysAliasingWithDest = true;
+
+  /// Buffer alignment for new memory allocations.
+  unsigned int bufferAlignment = 128;
+
+  /// If set to `false`, all ops are bufferized (as long as they implement
+  /// BufferizableOpInterface). Otherwise, only filtered ops are bufferized.
+  bool hasFilter = false;
+
+  /// A list of op filters that determine whether an op should be processed or
+  /// ignored by the bufferization. If `hasFilter`, only ops that are not
+  /// DENY-filtered and have at least one matching ALLOW filter are processed.
+  SmallVector<OpFilterEntry> opFilter;
 
 private:
-  /// Allow-list a dialect in the dialect filter.
+  /// Allow a dialect.
   template <typename DialectT>
-  void addToDialectFilterImpl() {
-    if (!dialectFilter.hasValue())
-      dialectFilter.emplace();
-    dialectFilter->insert(DialectT::getDialectNamespace());
+  void allowDialectInFilterImpl() {
+    allowDialectInFilter(DialectT::getDialectNamespace());
+  }
+
+  /// Allow an op.
+  template <typename OpTy>
+  void allowOperationInFilterImpl() {
+    allowOperationInFilter(OpTy::getOperationName());
   }
 };
 
@@ -158,9 +274,8 @@ public:
   SmallVector<OpOperand *> getAliasingOpOperand(OpResult result) const;
 
   /// Determine which OpResult will alias with `opOperand` if the op is
-  /// bufferized in place. Return an empty OpResult if the op is not
-  /// bufferizable.
-  OpResult getAliasingOpResult(OpOperand &opOperand) const;
+  /// bufferized in place. Return an empty vector if the op is not bufferizable.
+  SmallVector<OpResult> getAliasingOpResult(OpOperand &opOperand) const;
 
   /// Return true if `opOperand` bufferizes to a memory read. Return `true` if
   /// the op is not bufferizable.
@@ -251,7 +366,7 @@ public:
   const BufferizationOptions &getOptions() const { return options; }
 
 protected:
-  BufferizationState(const BufferizationOptions &options);
+  explicit BufferizationState(const BufferizationOptions &options);
 
   // BufferizationState should be passed as a reference.
   BufferizationState(const BufferizationState &) = delete;
@@ -266,10 +381,39 @@ private:
   const BufferizationOptions &options;
 };
 
+/// This a "no analysis, always copy" BufferizationState. In the absence of an
+/// analysis, a buffer must be copied each time it is written to. Therefore, all
+/// OpOperands that bufferize to a memory write must bufferize out-of-place.
+class AlwaysCopyBufferizationState : public BufferizationState {
+public:
+  explicit AlwaysCopyBufferizationState(const BufferizationOptions &options);
+
+  AlwaysCopyBufferizationState(const AlwaysCopyBufferizationState &) = delete;
+
+  virtual ~AlwaysCopyBufferizationState() = default;
+
+  /// Return `true` if the given OpResult has been decided to bufferize inplace.
+  bool isInPlace(OpOperand &opOperand) const override;
+
+  /// Return true if `v1` and `v2` bufferize to equivalent buffers.
+  bool areEquivalentBufferizedValues(Value v1, Value v2) const override;
+};
+
 /// Replace an op with replacement values. The op is deleted. Tensor OpResults
 /// must be replaced with memref values.
 void replaceOpWithBufferizedValues(RewriterBase &rewriter, Operation *op,
                                    ValueRange values);
+
+/// Lookup the buffer for the given value. If the value was not bufferized yet,
+/// wrap it in a ToMemrefOp. Otherwise, it is the result of a ToTensorOp, from
+/// which the memref operand is returned.
+///
+/// Note: Use `BufferizationState::getBuffer` during bufferization.
+/// `lookupBuffer` is just for compatibility and gradual migration of
+/// bufferization patterns to BufferizableOpInterface-based bufferization. It
+/// does not insert any buffer copies.
+Value lookupBuffer(RewriterBase &rewriter, Value tensor,
+                   const BufferizationOptions &options);
 
 /// Replace an op with a new op. The new op must have the same number of
 /// results as the replaced op. The new op may not return any tensor values.
@@ -282,21 +426,17 @@ OpTy replaceOpWithNewBufferizedOp(RewriterBase &rewriter, Operation *op,
 }
 
 /// Return a contiguous MemRefType (i.e. with canonical/empty layout map)
-/// with the same shape as `shapedType` and specified `layout` and
-/// `addressSpace`.
+/// with the same shape as `shapedType` and specified `addressSpace`.
 MemRefType getContiguousMemRefType(ShapedType shapedType,
-                                   MemRefLayoutAttrInterface layout = {},
                                    Attribute memorySpace = {});
-
-/// Return an UnrankedMemRefType with the given element type and memory space.
-UnrankedMemRefType getUnrankedMemRefType(Type elementType,
-                                         Attribute memorySpace = {});
 
 /// Return a MemRefType to which the `tensorType` can be bufferized in a
 /// composable fashion. The layout must be the most dynamic possible and
 /// canonicalize away once bufferization is finished.
-MemRefType getDynamicMemRefType(RankedTensorType tensorType,
-                                unsigned addressSpace = 0);
+BaseMemRefType getMemRefType(TensorType tensorType,
+                             const BufferizationOptions &options,
+                             MemRefLayoutAttrInterface layout = {},
+                             Attribute memorySpace = {});
 
 /// Creates a memref allocation with the given type and dynamic extents.
 FailureOr<Value> createAlloc(OpBuilder &b, Location loc, MemRefType type,
@@ -360,9 +500,10 @@ struct AllocationHoistingBarrierOnly
     return {};
   }
 
-  OpResult getAliasingOpResult(Operation *op, OpOperand &opOperand,
-                               const BufferizationState &state) const {
-    return OpResult();
+  SmallVector<OpResult>
+  getAliasingOpResult(Operation *op, OpOperand &opOperand,
+                      const BufferizationState &state) const {
+    return {};
   }
 
   BufferRelation bufferRelation(Operation *op, OpResult opResult,

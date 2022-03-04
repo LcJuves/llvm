@@ -117,6 +117,7 @@ public:
 private:
   bool doPeepholeLoadStoreADDI(SDNode *Node);
   bool doPeepholeSExtW(SDNode *Node);
+  bool doPeepholeMaskedRVV(SDNode *Node);
 };
 
 namespace RISCV {
@@ -161,6 +162,7 @@ struct VSXSEGPseudo {
 
 struct VLEPseudo {
   uint16_t Masked : 1;
+  uint16_t IsTU : 1;
   uint16_t Strided : 1;
   uint16_t FF : 1;
   uint16_t Log2SEW : 3;
@@ -178,11 +180,18 @@ struct VSEPseudo {
 
 struct VLX_VSXPseudo {
   uint16_t Masked : 1;
+  uint16_t IsTU : 1;
   uint16_t Ordered : 1;
   uint16_t Log2SEW : 3;
   uint16_t LMUL : 3;
   uint16_t IndexLMUL : 3;
   uint16_t Pseudo;
+};
+
+struct RISCVMaskedPseudoInfo {
+  uint16_t MaskedPseudo;
+  uint16_t UnmaskedPseudo;
+  uint8_t MaskOpIdx;
 };
 
 #define GET_RISCVVSSEGTable_DECL
@@ -193,6 +202,7 @@ struct VLX_VSXPseudo {
 #define GET_RISCVVSETable_DECL
 #define GET_RISCVVLXTable_DECL
 #define GET_RISCVVSXTable_DECL
+#define GET_RISCVMaskedPseudosTable_DECL
 #include "RISCVGenSearchableTables.inc"
 } // namespace RISCV
 

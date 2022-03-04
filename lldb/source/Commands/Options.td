@@ -488,6 +488,8 @@ let Command = "memory read" in {
     "display data.">;
   def memory_read_force : Option<"force", "r">, Groups<[1,2,3]>,
     Desc<"Necessary if reading over target.max-memory-read-size bytes.">;
+  def memory_read_show_tags : Option<"show-tags", "\\x01">, Group<1>,
+    Desc<"Include memory tags in output (does not apply to binary output).">;
 }
 
 let Command = "memory find" in {
@@ -955,6 +957,9 @@ let Command = "target modules lookup" in {
   def target_modules_lookup_type : Option<"type", "t">, Group<6>, Arg<"Name">,
     Required, Desc<"Lookup a type by name in the debug symbols in one or more "
     "target modules.">;
+  def target_modules_lookup_variables_ranges : Option<"show-variable-ranges", 
+    "\\x01">, GroupRange<1, 6>, Desc<"Dump valid ranges of variables (must be "
+    "used in conjunction with --verbose">;
   def target_modules_lookup_verbose : Option<"verbose", "v">,
     Desc<"Enable verbose lookup information.">;
   def target_modules_lookup_all : Option<"all", "A">, Desc<"Print all matches, "
