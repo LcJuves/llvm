@@ -2963,12 +2963,23 @@ struct AAHeapToSharedFunction : public AAHeapToShared {
   }
 
   void initialize(Attributor &A) override {
+    if (DisableOpenMPOptDeglobalization) {
+      indicatePessimisticFixpoint();
+      return;
+    }
+
     auto &OMPInfoCache = static_cast<OMPInformationCache &>(A.getInfoCache());
     auto &RFI = OMPInfoCache.RFIs[OMPRTL___kmpc_alloc_shared];
 
+    Attributor::SimplifictionCallbackTy SCB =
+        [](const IRPosition &, const AbstractAttribute *,
+           bool &) -> Optional<Value *> { return nullptr; };
     for (User *U : RFI.Declaration->users())
-      if (CallBase *CB = dyn_cast<CallBase>(U))
+      if (CallBase *CB = dyn_cast<CallBase>(U)) {
         MallocCalls.insert(CB);
+        A.registerSimplificationCallback(IRPosition::callsite_returned(*CB),
+                                         SCB);
+      }
 
     findPotentialRemovedFreeCalls(A);
   }
