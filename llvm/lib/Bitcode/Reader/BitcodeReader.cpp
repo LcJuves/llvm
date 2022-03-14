@@ -2511,9 +2511,10 @@ Error BitcodeReader::parseConstants() {
         SmallVector<int, 16> Mask;
         ShuffleVectorInst::getShuffleMask(Op2, Mask);
         Value *V = ConstantExpr::getShuffleVector(Op0, Op1, Mask);
-        ValueList.assignValue(
-            CstNo, V,
-            getVirtualTypeID(V->getType(), getContainedTypeID(OpTyID)));
+        if (Error Err = ValueList.assignValue(
+                CstNo, V,
+                getVirtualTypeID(V->getType(), getContainedTypeID(OpTyID))))
+          return Err;
       }
       for (auto &DelayedSelector : DelayedSelectors) {
         Type *OpTy = DelayedSelector.OpTy;
@@ -2539,7 +2540,8 @@ Error BitcodeReader::parseConstants() {
         Constant *Op0 =
             ValueList.getConstantFwdRef(Op0Idx, SelectorTy, SelectorTyID);
         Value *V = ConstantExpr::getSelect(Op0, Op1, Op2);
-        ValueList.assignValue(CstNo, V, OpTyID);
+        if (Error Err = ValueList.assignValue(CstNo, V, OpTyID))
+          return Err;
       }
 
       if (NextCstNo != ValueList.size())
@@ -3146,7 +3148,8 @@ Error BitcodeReader::parseConstants() {
     }
 
     assert(V->getType() == getTypeByID(CurTyID) && "Incorrect result type ID");
-    ValueList.assignValue(NextCstNo, V, CurTyID);
+    if (Error Err = ValueList.assignValue(NextCstNo, V, CurTyID))
+      return Err;
     ++NextCstNo;
   }
 }
@@ -4083,14 +4086,13 @@ Error BitcodeReader::typeCheckLoadStoreInst(Type *ValType, Type *PtrType) {
 
 Error BitcodeReader::propagateAttributeTypes(CallBase *CB,
                                              ArrayRef<unsigned> ArgTyIDs) {
+  AttributeList Attrs = CB->getAttributes();
   for (unsigned i = 0; i != CB->arg_size(); ++i) {
     for (Attribute::AttrKind Kind : {Attribute::ByVal, Attribute::StructRet,
                                      Attribute::InAlloca}) {
-      if (!CB->paramHasAttr(i, Kind) ||
-          CB->getParamAttr(i, Kind).getValueAsType())
+      if (!Attrs.hasParamAttr(i, Kind) ||
+          Attrs.getParamAttr(i, Kind).getValueAsType())
         continue;
-
-      CB->removeParamAttr(i, Kind);
 
       Type *PtrEltTy = getPtrElementTypeByID(ArgTyIDs[i]);
       if (!PtrEltTy)
@@ -4111,7 +4113,7 @@ Error BitcodeReader::propagateAttributeTypes(CallBase *CB,
         llvm_unreachable("not an upgraded type attribute");
       }
 
-      CB->addParamAttr(i, NewAttr);
+      Attrs = Attrs.addParamAttribute(Context, i, NewAttr);
     }
   }
 
@@ -4122,12 +4124,13 @@ Error BitcodeReader::propagateAttributeTypes(CallBase *CB,
       if (!CI.hasArg())
         continue;
 
-      if (CI.isIndirect && !CB->getParamElementType(ArgNo)) {
+      if (CI.isIndirect && !Attrs.getParamElementType(ArgNo)) {
         Type *ElemTy = getPtrElementTypeByID(ArgTyIDs[ArgNo]);
         if (!ElemTy)
           return error("Missing element type for inline asm upgrade");
-        CB->addParamAttr(
-            ArgNo, Attribute::get(Context, Attribute::ElementType, ElemTy));
+        Attrs = Attrs.addParamAttribute(
+            Context, ArgNo,
+            Attribute::get(Context, Attribute::ElementType, ElemTy));
       }
 
       ArgNo++;
@@ -4137,18 +4140,19 @@ Error BitcodeReader::propagateAttributeTypes(CallBase *CB,
   switch (CB->getIntrinsicID()) {
   case Intrinsic::preserve_array_access_index:
   case Intrinsic::preserve_struct_access_index:
-    if (!CB->getParamElementType(0)) {
+    if (!Attrs.getParamElementType(0)) {
       Type *ElTy = getPtrElementTypeByID(ArgTyIDs[0]);
       if (!ElTy)
         return error("Missing element type for elementtype upgrade");
       Attribute NewAttr = Attribute::get(Context, Attribute::ElementType, ElTy);
-      CB->addParamAttr(0, NewAttr);
+      Attrs = Attrs.addParamAttribute(Context, 0, NewAttr);
     }
     break;
   default:
     break;
   }
 
+  CB->setAttributes(Attrs);
   return Error::success();
 }
 
@@ -5291,7 +5295,7 @@ Error BitcodeReader::parseFunctionBody(Function *F) {
     }
 
     case bitc::FUNC_CODE_INST_ALLOCA: { // ALLOCA: [instty, opty, op, align]
-      if (Record.size() != 4)
+      if (Record.size() != 4 && Record.size() != 5)
         return error("Invalid record");
       using APV = AllocaPackedValues;
       const uint64_t Rec = Record[3];
@@ -5318,9 +5322,8 @@ Error BitcodeReader::parseFunctionBody(Function *F) {
       if (!Ty || !Size)
         return error("Invalid record");
 
-      // FIXME: Make this an optional field.
       const DataLayout &DL = TheModule->getDataLayout();
-      unsigned AS = DL.getAllocaAddrSpace();
+      unsigned AS = Record.size() == 5 ? Record[4] : DL.getAllocaAddrSpace();
 
       SmallPtrSet<Type *, 4> Visited;
       if (!Align && !Ty->isSized(&Visited))
@@ -5880,7 +5883,8 @@ Error BitcodeReader::parseFunctionBody(Function *F) {
     if (!I->getType()->isVoidTy()) {
       assert(I->getType() == getTypeByID(ResTypeID) &&
              "Incorrect result type ID");
-      ValueList.assignValue(NextValueNo++, I, ResTypeID);
+      if (Error Err = ValueList.assignValue(NextValueNo++, I, ResTypeID))
+        return Err;
     }
   }
 
