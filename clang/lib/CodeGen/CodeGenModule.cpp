@@ -43,6 +43,7 @@
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/Version.h"
+#include "clang/CodeGen/BackendUtil.h"
 #include "clang/CodeGen/ConstantInitBuilder.h"
 #include "clang/Frontend/FrontendDiagnostic.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -875,6 +876,9 @@ void CodeGenModule::Release() {
   getTargetCodeGenInfo().emitTargetMetadata(*this, MangledDeclNames);
 
   EmitBackendOptionsMetadata(getCodeGenOpts());
+
+  // If there is device offloading code embed it in the host now.
+  EmbedObject(&getModule(), CodeGenOpts, getDiags());
 
   // Set visibility from DLL storage class
   // We do this at the end of LLVM IR generation; after any operation
@@ -2060,6 +2064,13 @@ bool CodeGenModule::GetCPUAndFeaturesAttributes(GlobalDecl GD,
           getTarget().isValidCPUName(ParsedAttr.Tune))
         TuneCPU = ParsedAttr.Tune;
     }
+
+    if (SD) {
+      // Apply the given CPU name as the 'tune-cpu' so that the optimizer can
+      // favor this processor.
+      TuneCPU = getTarget().getCPUSpecificTuneName(
+          SD->getCPUName(GD.getMultiVersionIndex())->getName());
+    }
   } else {
     // Otherwise just add the existing target cpu and target features to the
     // function.
@@ -2497,8 +2508,8 @@ void CodeGenModule::EmitDeferred() {
   // Note we should not clear CUDADeviceVarODRUsedByHost since it is still
   // needed for further handling.
   if (getLangOpts().CUDA && getLangOpts().CUDAIsDevice)
-    for (const auto *V : getContext().CUDADeviceVarODRUsedByHost)
-      DeferredDeclsToEmit.push_back(V);
+    llvm::append_range(DeferredDeclsToEmit,
+                       getContext().CUDADeviceVarODRUsedByHost);
 
   // Stop if we're out of both deferred vtables and deferred declarations.
   if (DeferredDeclsToEmit.empty())
@@ -2892,6 +2903,37 @@ ConstantAddress CodeGenModule::GetAddrOfMSGuidDecl(const MSGuidDecl *GD) {
   llvm::Constant *Addr = llvm::ConstantExpr::getBitCast(
       GV, Ty->getPointerTo(GV->getAddressSpace()));
   return ConstantAddress(Addr, Ty, Alignment);
+}
+
+ConstantAddress CodeGenModule::GetAddrOfUnnamedGlobalConstantDecl(
+    const UnnamedGlobalConstantDecl *GCD) {
+  CharUnits Alignment = getContext().getTypeAlignInChars(GCD->getType());
+
+  llvm::GlobalVariable **Entry = nullptr;
+  Entry = &UnnamedGlobalConstantDeclMap[GCD];
+  if (*Entry)
+    return ConstantAddress(*Entry, (*Entry)->getValueType(), Alignment);
+
+  ConstantEmitter Emitter(*this);
+  llvm::Constant *Init;
+
+  const APValue &V = GCD->getValue();
+
+  assert(!V.isAbsent());
+  Init = Emitter.emitForInitializer(V, GCD->getType().getAddressSpace(),
+                                    GCD->getType());
+
+  auto *GV = new llvm::GlobalVariable(getModule(), Init->getType(),
+                                      /*isConstant=*/true,
+                                      llvm::GlobalValue::PrivateLinkage, Init,
+                                      ".constant");
+  GV->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+  GV->setAlignment(Alignment.getAsAlign());
+
+  Emitter.finalize(GV);
+
+  *Entry = GV;
+  return ConstantAddress(GV, GV->getValueType(), Alignment);
 }
 
 ConstantAddress CodeGenModule::GetAddrOfTemplateParamObject(
@@ -5448,6 +5490,8 @@ CodeGenModule::GetAddrOfConstantCFString(const StringLiteral *Literal) {
     llvm_unreachable("GOFF is not yet implemented");
   case llvm::Triple::XCOFF:
     llvm_unreachable("XCOFF is not yet implemented");
+  case llvm::Triple::DXContainer:
+    llvm_unreachable("DXContainer is not yet implemented");
   case llvm::Triple::COFF:
   case llvm::Triple::ELF:
   case llvm::Triple::Wasm:
@@ -6445,8 +6489,9 @@ void CodeGenModule::EmitOMPThreadPrivateDecl(const OMPThreadPrivateDecl *D) {
         !VD->getAnyInitializer()->isConstantInitializer(getContext(),
                                                         /*ForRef=*/false);
 
-    Address Addr = Address::deprecated(GetAddrOfGlobalVar(VD),
-                                       getContext().getDeclAlign(VD));
+    Address Addr(GetAddrOfGlobalVar(VD),
+                 getTypes().ConvertTypeForMem(VD->getType()),
+                 getContext().getDeclAlign(VD));
     if (auto InitFunction = getOpenMPRuntime().emitThreadPrivateVarDefinition(
             VD, Addr, RefExpr->getBeginLoc(), PerformInit))
       CXXGlobalInits.push_back(InitFunction);
