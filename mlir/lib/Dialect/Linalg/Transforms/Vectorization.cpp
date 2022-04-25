@@ -12,6 +12,7 @@
 
 #include "mlir/Analysis/SliceAnalysis.h"
 #include "mlir/Dialect/Affine/Analysis/LoopAnalysis.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/Analysis/DependenceAnalysis.h"
@@ -504,7 +505,7 @@ vectorizeAsLinalgGeneric(OpBuilder &b, LinalgOp linalgOp,
     //   readType = VectorType::get({}, bbarg.getType());
     // } else {
     if (opOperand->getOperandNumber() < linalgOp.getNumInputs()) {
-      map = inverseAndBroadcastProjectedPermuation(
+      map = inverseAndBroadcastProjectedPermutation(
           linalgOp.getTiedIndexingMap(opOperand));
       readType = VectorType::get(commonVectorShape,
                                  getElementTypeOrSelf(opOperand->get()));
@@ -676,7 +677,6 @@ LogicalResult mlir::linalg::vectorizeCopy(RewriterBase &rewriter,
   Operation *writeValue = rewriter.create<vector::TransferWriteOp>(
       loc, readValue, copyOp.target(), indices,
       rewriter.getMultiDimIdentityMap(srcType.getRank()));
-  copyOp->getParentOfType<FuncOp>().dump();
   rewriter.replaceOp(copyOp, writeValue->getResults());
   return success();
 }

@@ -614,7 +614,8 @@ static void indirectCopyToAGPR(const SIInstrInfo &TII,
   // Registers in the sequence are allocated contiguously so we can just
   // use register number to pick one of three round-robin temps.
   unsigned RegNo = DestReg % 3;
-  Register Tmp = AMDGPU::VGPR32;
+  Register Tmp =
+      MBB.getParent()->getInfo<SIMachineFunctionInfo>()->getVGPRForAGPRCopy();
   assert(MBB.getParent()->getRegInfo().isReserved(Tmp) &&
          "VGPR used for an intermediate copy should have been reserved.");
 
@@ -5010,7 +5011,10 @@ bool SIInstrInfo::isOperandLegal(const MachineInstr &MI, unsigned OpIdx,
   }
 
   if (MO->isReg()) {
-    assert(DefinedRC);
+    if (!DefinedRC) {
+      // This operand allows any register.
+      return true;
+    }
     if (!isLegalRegOperand(MRI, OpInfo, *MO))
       return false;
     bool IsAGPR = RI.isAGPR(MRI, MO->getReg());
@@ -7461,7 +7465,9 @@ unsigned SIInstrInfo::getInstSizeInBytes(const MachineInstr &MI) const {
       return DescSize;
     bool HasLiteral = false;
     for (int I = 0, E = MI.getNumExplicitOperands(); I != E; ++I) {
-      if (isLiteralConstant(MI, I)) {
+      const MachineOperand &Op = MI.getOperand(I);
+      const MCOperandInfo &OpInfo = Desc.OpInfo[I];
+      if (isLiteralConstantLike(Op, OpInfo)) {
         HasLiteral = true;
         break;
       }
@@ -8068,7 +8074,7 @@ bool llvm::execMayBeModifiedBeforeAnyUse(const MachineRegisterInfo &MRI,
     auto &UseInst = *Use.getParent();
     // Don't bother searching between blocks, although it is possible this block
     // doesn't modify exec.
-    if (UseInst.getParent() != DefBB)
+    if (UseInst.getParent() != DefBB || UseInst.isPHI())
       return true;
 
     if (++NumUse > MaxUseScan)

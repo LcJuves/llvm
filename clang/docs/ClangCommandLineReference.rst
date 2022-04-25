@@ -801,7 +801,7 @@ Generate Interface Stub Files, emit merged text not binary.
 
 Extract API information
 
-.. option:: -fopenmp-new-driver
+.. option:: -fopenmp-new-driver, fno-openmp-new-driver
 
 Use the new driver for OpenMP offloading.
 
@@ -1175,6 +1175,14 @@ Validate the system headers that a module depends on when loading the module
 .. option:: -fprebuilt-module-path=<directory>
 
 Specify the prebuilt module path
+
+.. option:: -fmodule-header
+
+Build a C++20 header unit from a header specified.
+
+.. option:: -fmodule-header=\[user,system\]
+
+Build a C++20 header unit, but search for the header in the user or system header search paths respectively.
 
 .. option:: --hip-path=<arg>
 
@@ -2092,10 +2100,6 @@ Emit OpenMP code only for SIMD-based constructs.
 .. option:: -fopenmp-target-debug, -fno-openmp-target-debug
 
 Enable debugging in the OpenMP offloading device RTL
-
-.. option:: -fopenmp-target-new-runtime, -fno-openmp-target-new-runtime
-
-Use the new bitcode library for OpenMP offloading
 
 .. option:: -fopenmp-offload-mandatory
 

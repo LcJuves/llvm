@@ -281,7 +281,7 @@ public:
 
   bool Pre(const parser::StmtFunctionStmt &x) {
     const auto &parsedExpr{std::get<parser::Scalar<parser::Expr>>(x.t)};
-    if (const auto *expr{GetExpr(parsedExpr)}) {
+    if (const auto *expr{GetExpr(context_, parsedExpr)}) {
       for (const Symbol &symbol : evaluate::CollectSymbols(*expr)) {
         if (!IsStmtFunctionDummy(symbol)) {
           stmtFunctionExprSymbols_.insert(symbol.GetUltimate());
@@ -364,18 +364,18 @@ public:
     return false;
   }
   bool Pre(const parser::OmpLinearClause &x) {
-    std::visit(common::visitors{
-                   [&](const parser::OmpLinearClause::WithoutModifier
-                           &linearWithoutModifier) {
-                     ResolveOmpNameList(
-                         linearWithoutModifier.names, Symbol::Flag::OmpLinear);
-                   },
-                   [&](const parser::OmpLinearClause::WithModifier
-                           &linearWithModifier) {
-                     ResolveOmpNameList(
-                         linearWithModifier.names, Symbol::Flag::OmpLinear);
-                   },
-               },
+    common::visit(common::visitors{
+                      [&](const parser::OmpLinearClause::WithoutModifier
+                              &linearWithoutModifier) {
+                        ResolveOmpNameList(linearWithoutModifier.names,
+                            Symbol::Flag::OmpLinear);
+                      },
+                      [&](const parser::OmpLinearClause::WithModifier
+                              &linearWithModifier) {
+                        ResolveOmpNameList(
+                            linearWithModifier.names, Symbol::Flag::OmpLinear);
+                      },
+                  },
         x.u);
     return false;
   }
@@ -530,7 +530,7 @@ private:
   void CheckDataCopyingClause(
       const parser::Name &, const Symbol &, Symbol::Flag);
   void CheckAssocLoopLevel(std::int64_t level, const parser::OmpClause *clause);
-  void CheckPrivateDSAObject(
+  void CheckObjectInNamelist(
       const parser::Name &, const Symbol &, Symbol::Flag);
   void CheckSourceLabel(const parser::Label &);
   void CheckLabelContext(const parser::CharBlock, const parser::CharBlock,
@@ -756,7 +756,7 @@ bool AccAttributeVisitor::Pre(const parser::OpenACCCombinedConstruct &x) {
 static bool IsLastNameArray(const parser::Designator &designator) {
   const auto &name{GetLastName(designator)};
   const evaluate::DataRef dataRef{*(name.symbol)};
-  return std::visit(
+  return common::visit(
       common::visitors{
           [](const evaluate::SymbolRef &ref) { return ref->Rank() > 0; },
           [](const evaluate::ArrayRef &aref) {
@@ -771,7 +771,7 @@ static bool IsLastNameArray(const parser::Designator &designator) {
 void AccAttributeVisitor::AllowOnlyArrayAndSubArray(
     const parser::AccObjectList &objectList) {
   for (const auto &accObject : objectList.v) {
-    std::visit(
+    common::visit(
         common::visitors{
             [&](const parser::Designator &designator) {
               if (!IsLastNameArray(designator)) {
@@ -798,7 +798,7 @@ void AccAttributeVisitor::AllowOnlyArrayAndSubArray(
 void AccAttributeVisitor::DoNotAllowAssumedSizedArray(
     const parser::AccObjectList &objectList) {
   for (const auto &accObject : objectList.v) {
-    std::visit(
+    common::visit(
         common::visitors{
             [&](const parser::Designator &designator) {
               const auto &name{GetLastName(designator)};
@@ -883,7 +883,7 @@ void AccAttributeVisitor::PrivatizeAssociatedLoopIndex(
 void AccAttributeVisitor::EnsureAllocatableOrPointer(
     const llvm::acc::Clause clause, const parser::AccObjectList &objectList) {
   for (const auto &accObject : objectList.v) {
-    std::visit(
+    common::visit(
         common::visitors{
             [&](const parser::Designator &designator) {
               const auto &lastName{GetLastName(designator)};
@@ -977,7 +977,7 @@ void AccAttributeVisitor::ResolveAccObjectList(
 
 void AccAttributeVisitor::ResolveAccObject(
     const parser::AccObject &accObject, Symbol::Flag accFlag) {
-  std::visit(
+  common::visit(
       common::visitors{
           [&](const parser::Designator &designator) {
             if (const auto *name{GetDesignatorNameIfDataRef(designator)}) {
@@ -1572,7 +1572,7 @@ void OmpAttributeVisitor::ResolveOmpObjectList(
 
 void OmpAttributeVisitor::ResolveOmpObject(
     const parser::OmpObject &ompObject, Symbol::Flag ompFlag) {
-  std::visit(
+  common::visit(
       common::visitors{
           [&](const parser::Designator &designator) {
             if (const auto *name{GetDesignatorNameIfDataRef(designator)}) {
@@ -1585,7 +1585,7 @@ void OmpAttributeVisitor::ResolveOmpObject(
                     CheckMultipleAppearances(*name, *symbol, ompFlag);
                   }
                   if (privateDataSharingAttributeFlags.test(ompFlag)) {
-                    CheckPrivateDSAObject(*name, *symbol, ompFlag);
+                    CheckObjectInNamelist(*name, *symbol, ompFlag);
                   }
 
                   if (ompFlag == Symbol::Flag::OmpAllocate) {
@@ -1779,7 +1779,7 @@ void OmpAttributeVisitor::CheckDataCopyingClause(
   }
 }
 
-void OmpAttributeVisitor::CheckPrivateDSAObject(
+void OmpAttributeVisitor::CheckObjectInNamelist(
     const parser::Name &name, const Symbol &symbol, Symbol::Flag ompFlag) {
   const auto &ultimateSymbol{symbol.GetUltimate()};
   llvm::StringRef clauseName{"PRIVATE"};
@@ -1792,14 +1792,6 @@ void OmpAttributeVisitor::CheckPrivateDSAObject(
   if (ultimateSymbol.test(Symbol::Flag::InNamelist)) {
     context_.Say(name.source,
         "Variable '%s' in NAMELIST cannot be in a %s clause"_err_en_US,
-        name.ToString(), clauseName.str());
-  }
-
-  if (stmtFunctionExprSymbols_.find(ultimateSymbol) !=
-      stmtFunctionExprSymbols_.end()) {
-    context_.Say(name.source,
-        "Variable '%s' in STATEMENT FUNCTION expression cannot be in a "
-        "%s clause"_err_en_US,
         name.ToString(), clauseName.str());
   }
 }

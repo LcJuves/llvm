@@ -481,7 +481,11 @@ static llvm::Function *emitOutlinedFunctionPrologue(
     if (ArgType->isVariablyModifiedType())
       ArgType = getCanonicalParamType(Ctx, ArgType);
     VarDecl *Arg;
-    if (DebugFunctionDecl && (CapVar || I->capturesThis())) {
+    if (CapVar && (CapVar->getTLSKind() != clang::VarDecl::TLS_None)) {
+      Arg = ImplicitParamDecl::Create(Ctx, /*DC=*/nullptr, FD->getLocation(),
+                                      II, ArgType,
+                                      ImplicitParamDecl::ThreadPrivateVar);
+    } else if (DebugFunctionDecl && (CapVar || I->capturesThis())) {
       Arg = ParmVarDecl::Create(
           Ctx, DebugFunctionDecl,
           CapVar ? CapVar->getBeginLoc() : FD->getBeginLoc(),
@@ -3760,9 +3764,11 @@ void CodeGenFunction::EmitOMPForDirective(const OMPForDirective &S) {
           CGM.getOpenMPRuntime().getOMPBuilder();
       llvm::OpenMPIRBuilder::InsertPointTy AllocaIP(
           AllocaInsertPt->getParent(), AllocaInsertPt->getIterator());
-      OMPBuilder.applyWorkshareLoop(Builder.getCurrentDebugLocation(), CLI,
-                                    AllocaIP, NeedsBarrier, SchedKind,
-                                    ChunkSize);
+      OMPBuilder.applyWorkshareLoop(
+          Builder.getCurrentDebugLocation(), CLI, AllocaIP, NeedsBarrier,
+          SchedKind, ChunkSize, /*HasSimdModifier=*/false,
+          /*HasMonotonicModifier=*/false, /*HasNonmonotonicModifier=*/false,
+          /*HasOrderedClause=*/false);
       return;
     }
 
@@ -6164,6 +6170,7 @@ static void emitOMPAtomicExpr(CodeGenFunction &CGF, OpenMPClauseKind Kind,
   case OMPC_use_device_ptr:
   case OMPC_use_device_addr:
   case OMPC_is_device_ptr:
+  case OMPC_has_device_addr:
   case OMPC_unified_address:
   case OMPC_unified_shared_memory:
   case OMPC_reverse_offload:

@@ -80,7 +80,7 @@ static MachineOperand earlyUseOperand(MachineOperand Op) {
 SystemZTargetLowering::SystemZTargetLowering(const TargetMachine &TM,
                                              const SystemZSubtarget &STI)
     : TargetLowering(TM), Subtarget(STI) {
-  MVT PtrVT = MVT::getIntegerVT(8 * TM.getPointerSize(0));
+  MVT PtrVT = MVT::getIntegerVT(TM.getPointerSizeInBits(0));
 
   auto *Regs = STI.getSpecialRegisters();
 
@@ -1033,6 +1033,17 @@ SystemZTargetLowering::getConstraintType(StringRef Constraint) const {
     case 'L': // Signed 20-bit displacement (on all targets we support)
     case 'M': // 0x7fffffff
       return C_Immediate;
+
+    default:
+      break;
+    }
+  } else if (Constraint.size() == 2 && Constraint[0] == 'Z') {
+    switch (Constraint[1]) {
+    case 'Q': // Address with base and unsigned 12-bit displacement
+    case 'R': // Likewise, plus an index
+    case 'S': // Address with base and signed 20-bit displacement
+    case 'T': // Likewise, plus an index
+      return C_Address;
 
     default:
       break;
