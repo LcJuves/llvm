@@ -354,6 +354,9 @@ void ObjFile::parseSections(ArrayRef<SectionHeader> sectionHeaders) {
       // spurious duplicate symbol errors, we do not parse these sections.
       // TODO: Evaluate whether the bitcode metadata is needed.
     } else {
+      if (name == section_names::addrSig)
+        addrSigSection = sections.back();
+
       auto *isec = make<ConcatInputSection>(section, data, align);
       if (isDebugSection(isec->getFlags()) &&
           isec->getSegName() == segment_names::dwarf) {
@@ -1289,11 +1292,10 @@ void DylibFile::parseLoadCommands(MemoryBufferRef mb) {
 
 // Some versions of Xcode ship with .tbd files that don't have the right
 // platform settings.
-constexpr std::array<StringRef, 4> skipPlatformChecks{
+constexpr std::array<StringRef, 3> skipPlatformChecks{
     "/usr/lib/system/libsystem_kernel.dylib",
     "/usr/lib/system/libsystem_platform.dylib",
-    "/usr/lib/system/libsystem_pthread.dylib",
-    "/usr/lib/system/libcompiler_rt.dylib"};
+    "/usr/lib/system/libsystem_pthread.dylib"};
 
 static bool skipPlatformCheckForCatalyst(const InterfaceFile &interface,
                                          bool explicitlyLinked) {

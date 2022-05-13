@@ -248,7 +248,7 @@ public:
     if (FileOS) {
       *FileOS << Buffer->Data;
       // Make sure it hits disk now.
-      FileOS->flush();
+      FileOS.reset();
     }
 
     this->HasEmittedPreamblePCH = true;
@@ -372,6 +372,15 @@ public:
   llvm::StringRef memoryContents() const {
     assert(getKind() == Kind::InMemory);
     return StringRef(Memory->Data.data(), Memory->Data.size());
+  }
+
+  // Shrink in-memory buffers to fit.
+  // This incurs a copy, but preambles tend to be long-lived.
+  // Only safe to call once nothing can alias the buffer.
+  void shrink() {
+    if (!Memory)
+      return;
+    Memory->Data = decltype(Memory->Data)(Memory->Data);
   }
 
 private:
@@ -520,7 +529,7 @@ llvm::ErrorOr<PrecompiledPreamble> PrecompiledPreamble::Build(
 
   if (!Act->hasEmittedPreamblePCH())
     return BuildPreambleError::CouldntEmitPCH;
-  Act.reset(); // Frees the PCH buffer frees, unless Storage keeps it in memory.
+  Act.reset(); // Frees the PCH buffer, unless Storage keeps it in memory.
 
   // Keep track of all of the files that the source manager knows about,
   // so we can verify whether they have changed or not.
@@ -545,6 +554,11 @@ llvm::ErrorOr<PrecompiledPreamble> PrecompiledPreamble::Build(
     }
   }
 
+  // Shrinking the storage requires extra temporary memory.
+  // Destroying clang first reduces peak memory usage.
+  CICleanup.unregister();
+  Clang.reset();
+  Storage->shrink();
   return PrecompiledPreamble(
       std::move(Storage), std::move(PreambleBytes), PreambleEndsAtStartOfLine,
       std::move(FilesInPreamble), std::move(MissingFiles));
@@ -750,6 +764,10 @@ void PrecompiledPreamble::configurePreamble(
       Bounds.PreambleEndsAtStartOfLine;
   PreprocessorOpts.DisablePCHOrModuleValidation =
       DisableValidationForModuleKind::PCH;
+
+  // Don't bother generating the long version of the predefines buffer.
+  // The preamble is going to overwrite it anyway.
+  PreprocessorOpts.UsePredefines = false;
 
   setupPreambleStorage(*Storage, PreprocessorOpts, VFS);
 }

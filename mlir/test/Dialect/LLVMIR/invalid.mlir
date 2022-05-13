@@ -508,7 +508,7 @@ func.func @invalid_vector_type_5(%a : vector<4xf32>, %idx : i32) -> vector<4xf32
 // -----
 
 func.func @null_non_llvm_type() {
-  // expected-error@+1 {{must be LLVM pointer type, but got 'i32'}}
+  // expected-error@+1 {{custom op 'llvm.mlir.null' invalid kind of type specified}}
   llvm.mlir.null : i32
 }
 
@@ -1256,6 +1256,14 @@ func.func @bitcast(%arg0: vector<2x3xf32>) {
 func.func @cp_async(%arg0: !llvm.ptr<i8, 3>, %arg1: !llvm.ptr<i8, 1>) {
   // expected-error @below {{expected byte size to be either 4, 8 or 16.}}
   nvvm.cp.async.shared.global %arg0, %arg1, 32
+  return
+}
+
+// -----
+
+func.func @cp_async(%arg0: !llvm.ptr<i8, 3>, %arg1: !llvm.ptr<i8, 1>) {
+  // expected-error @below {{bypass l1 is only support for 16 bytes copy.}}
+  nvvm.cp.async.shared.global %arg0, %arg1, 8 {bypass_l1}
   return
 }
 
