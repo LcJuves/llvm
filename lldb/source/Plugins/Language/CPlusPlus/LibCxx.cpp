@@ -546,7 +546,7 @@ bool lldb_private::formatters::LibcxxContainerSummaryProvider(
                                        nullptr, nullptr, &valobj, false, false);
 }
 
-// the field layout in a libc++ string (cap, side, data or data, size, cap)
+/// The field layout in a libc++ string (cap, side, data or data, size, cap).
 enum LibcxxStringLayoutMode {
   eLibcxxStringLayoutModeCSD = 0,
   eLibcxxStringLayoutModeDSC = 1,
@@ -558,12 +558,14 @@ enum LibcxxStringLayoutMode {
 // TODO: Support big-endian architectures.
 static llvm::Optional<std::pair<uint64_t, ValueObjectSP>>
 ExtractLibcxxStringInfo(ValueObject &valobj) {
-  ValueObjectSP D(valobj.GetChildAtIndexPath({0, 0, 0, 0}));
-  if (!D)
+  ValueObjectSP dataval_sp(valobj.GetChildAtIndexPath({0, 0, 0, 0}));
+  if (!dataval_sp)
+    return {};
+  if (!dataval_sp->GetError().Success())
     return {};
 
   ValueObjectSP layout_decider(
-      D->GetChildAtIndexPath(llvm::ArrayRef<size_t>({0, 0})));
+      dataval_sp->GetChildAtIndexPath(llvm::ArrayRef<size_t>({0, 0})));
 
   // this child should exist
   if (!layout_decider)
@@ -581,12 +583,27 @@ ExtractLibcxxStringInfo(ValueObject &valobj) {
                                       : eLibcxxStringLayoutModeCSD;
   uint64_t size_mode_value = 0;
 
-  if (ValueObjectSP is_long = D->GetChildAtNamePath(
-          {ConstString("__s"), ConstString("__is_long_")})) {
+  ValueObjectSP short_sp(dataval_sp->GetChildAtIndex(1, true));
+  if (!short_sp)
+    return {};
+
+  ValueObjectSP short_fields_sp;
+  ValueObjectSP is_long =
+      short_sp->GetChildMemberWithName(ConstString("__is_long_"), true);
+  if (is_long) {
+    short_fields_sp = short_sp;
+  } else {
+    // After D128285, we need to access the `__is_long_` and `__size_` fields
+    // from a packed anonymous struct
+    short_fields_sp = short_sp->GetChildAtIndex(0, true);
+    is_long = short_sp->GetChildMemberWithName(ConstString("__is_long_"), true);
+  }
+
+  if (is_long) {
     using_bitmasks = false;
     short_mode = !is_long->GetValueAsUnsigned(/*fail_value=*/0);
     if (ValueObjectSP size_member =
-            D->GetChildAtNamePath({ConstString("__s"), ConstString("__size_")}))
+            dataval_sp->GetChildAtNamePath({ConstString("__s"), ConstString("__size_")}))
       size = size_member->GetValueAsUnsigned(/*fail_value=*/0);
     else
       return {};
@@ -599,7 +616,7 @@ ExtractLibcxxStringInfo(ValueObject &valobj) {
     };
     ValueObjectSP size_mode;
     for (llvm::ArrayRef<size_t> loc : size_mode_locations) {
-      size_mode = D->GetChildAtIndexPath(loc);
+      size_mode = dataval_sp->GetChildAtIndexPath(loc);
       if (size_mode && size_mode->GetName() == g_size_name)
         break;
     }
@@ -610,7 +627,7 @@ ExtractLibcxxStringInfo(ValueObject &valobj) {
     size_mode_value = (size_mode->GetValueAsUnsigned(0));
     short_mode = ((size_mode_value & 0x80) == 0);
   } else {
-    ValueObjectSP size_mode(D->GetChildAtIndexPath({1, 0, 0}));
+    ValueObjectSP size_mode(dataval_sp->GetChildAtIndexPath({1, 0, 0}));
     if (!size_mode)
       return {};
 
@@ -619,11 +636,8 @@ ExtractLibcxxStringInfo(ValueObject &valobj) {
   }
 
   if (short_mode) {
-    ValueObjectSP s(D->GetChildAtIndex(1, true));
-    if (!s)
-      return {};
-    ValueObjectSP location_sp = s->GetChildAtIndex(
-        (layout == eLibcxxStringLayoutModeDSC) ? 0 : 1, true);
+    ValueObjectSP location_sp =
+        short_sp->GetChildMemberWithName(g_data_name, true);
     if (using_bitmasks)
       size = (layout == eLibcxxStringLayoutModeDSC)
                  ? size_mode_value
@@ -642,9 +656,10 @@ ExtractLibcxxStringInfo(ValueObject &valobj) {
     return std::make_pair(size, location_sp);
   }
 
-  ValueObjectSP l(D->GetChildAtIndex(0, true));
+  ValueObjectSP l(dataval_sp->GetChildAtIndex(0, true));
   if (!l)
     return {};
+
   // we can use the layout_decider object as the data pointer
   ValueObjectSP location_sp =
       l->GetChildMemberWithName(ConstString("__data_"), /*can_create=*/true);
@@ -652,6 +667,14 @@ ExtractLibcxxStringInfo(ValueObject &valobj) {
       l->GetChildMemberWithName(ConstString("__size_"), /*can_create=*/true);
   ValueObjectSP capacity_vo =
       l->GetChildMemberWithName(ConstString("__cap_"), /*can_create=*/true);
+  if (!capacity_vo) {
+    // After D128285, we need to access the `__cap_` field from a packed
+    // anonymous struct
+    if (ValueObjectSP packed_fields_sp = l->GetChildAtIndex(0, true)) {
+      ValueObjectSP capacity_vo = packed_fields_sp->GetChildMemberWithName(
+          ConstString("__cap_"), /*can_create=*/true);
+    }
+  }
   if (!size_vo || !location_sp || !capacity_vo)
     return {};
   size = size_vo->GetValueAsUnsigned(LLDB_INVALID_OFFSET);

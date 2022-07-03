@@ -236,7 +236,7 @@ TEST(CastingTest, dyn_cast_or_null) {
 TEST(CastingTest, dyn_cast_value_types) {
   T1 t1;
   Optional<T2> t2 = dyn_cast<T2>(t1);
-  EXPECT_TRUE(t2.hasValue());
+  EXPECT_TRUE(t2);
 
   T2 *t2ptr = dyn_cast<T2>(&t1);
   EXPECT_TRUE(t2ptr != nullptr);
@@ -298,11 +298,9 @@ TEST(CastingTest, unique_dyn_cast) {
   ASSERT_EQ(OrigD, D.get());
   ASSERT_EQ(nullptr, NewB);
 
-  // Converting between unrelated types should fail.  The original value should
-  // remain unchanged and it should return nullptr.
-  //
-  // Note that this is a very contrived test - most of the time we want a cast
-  // like this to emit a compiler error.
+  // This is a very contrived test, casting between completely unrelated types
+  // should generally fail to compile. See the classof shenanigans we have in
+  // the definition of `foo` above.
   auto F = unique_dyn_cast<foo>(D);
   ASSERT_EQ(nullptr, F);
   ASSERT_EQ(OrigD, D.get());
@@ -317,6 +315,9 @@ TEST(CastingTest, unique_dyn_cast) {
   auto B3 = unique_dyn_cast<base>(newb());
   EXPECT_NE(nullptr, B3);
 
+  // This is a very contrived test, casting between completely unrelated types
+  // should generally fail to compile. See the classof shenanigans we have in
+  // the definition of `foo` above.
   auto F2 = unique_dyn_cast<foo>(newb());
   EXPECT_EQ(nullptr, F2);
 }
@@ -495,4 +496,42 @@ TEST(CastingTest, smart_dyn_cast_or_null) {
 }
 
 } // end namespace pointer_wrappers
+
+#ifndef NDEBUG
+namespace assertion_checks {
+struct Base {
+  virtual ~Base() {}
+};
+
+struct Derived : public Base {
+  static bool classof(const Base *B) { return false; }
+};
+
+TEST(CastingTest, assertion_check_const_ref) {
+  const Base B;
+  EXPECT_DEATH((void)cast<Derived>(B), "argument of incompatible type")
+      << "Invalid cast of const ref did not cause an abort()";
+}
+
+TEST(CastingTest, assertion_check_ref) {
+  Base B;
+  EXPECT_DEATH((void)cast<Derived>(B), "argument of incompatible type")
+      << "Invalid cast of const ref did not cause an abort()";
+}
+
+TEST(CastingTest, assertion_check_ptr) {
+  Base B;
+  EXPECT_DEATH((void)cast<Derived>(&B), "argument of incompatible type")
+      << "Invalid cast of const ref did not cause an abort()";
+}
+
+TEST(CastingTest, assertion_check_unique_ptr) {
+  auto B = std::make_unique<Base>();
+  EXPECT_DEATH((void)cast<Derived>(std::move(B)),
+               "argument of incompatible type")
+      << "Invalid cast of const ref did not cause an abort()";
+}
+
+} // end namespace assertion_checks
+#endif
 } // end namespace

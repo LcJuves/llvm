@@ -50,6 +50,7 @@
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Utility/State.h"
 #include "lldb/Utility/Timer.h"
+#include "lldb/lldb-enumerations.h"
 #include "lldb/lldb-private-enumerations.h"
 
 #include "llvm/ADT/ScopeExit.h"
@@ -298,12 +299,6 @@ protected:
 
       const char *file_path = command.GetArgumentAtIndex(0);
       LLDB_SCOPED_TIMERF("(lldb) target create '%s'", file_path);
-      FileSpec file_spec;
-
-      if (file_path) {
-        file_spec.SetFile(file_path, FileSpec::Style::native);
-        FileSystem::Instance().Resolve(file_spec);
-      }
 
       bool must_set_platform_path = false;
 
@@ -331,6 +326,18 @@ protected:
       // CreateTarget() we can't rely on the selected platform.
 
       PlatformSP platform_sp = target_sp->GetPlatform();
+
+      FileSpec file_spec;
+      if (file_path) {
+        file_spec.SetFile(file_path, FileSpec::Style::native);
+        FileSystem::Instance().Resolve(file_spec);
+
+        // Try to resolve the exe based on PATH and/or platform-specific
+        // suffixes, but only if using the host platform.
+        if (platform_sp && platform_sp->IsHost() &&
+            !FileSystem::Instance().Exists(file_spec))
+          FileSystem::Instance().ResolveExecutableLocation(file_spec);
+      }
 
       if (remote_file) {
         if (platform_sp) {
@@ -480,18 +487,14 @@ public:
 
 protected:
   bool DoExecute(Args &args, CommandReturnObject &result) override {
-    if (args.GetArgumentCount() == 0) {
-      Stream &strm = result.GetOutputStream();
+    Stream &strm = result.GetOutputStream();
 
-      bool show_stopped_process_status = false;
-      if (DumpTargetList(GetDebugger().GetTargetList(),
-                         show_stopped_process_status, strm) == 0) {
-        strm.PutCString("No targets.\n");
-      }
-      result.SetStatus(eReturnStatusSuccessFinishResult);
-    } else {
-      result.AppendError("the 'target list' command takes no arguments\n");
+    bool show_stopped_process_status = false;
+    if (DumpTargetList(GetDebugger().GetTargetList(),
+                       show_stopped_process_status, strm) == 0) {
+      strm.PutCString("No targets.\n");
     }
+    result.SetStatus(eReturnStatusSuccessFinishResult);
     return result.Succeeded();
   }
 };
@@ -504,6 +507,8 @@ public:
       : CommandObjectParsed(
             interpreter, "target select",
             "Select a target as the current target by target index.", nullptr) {
+    CommandArgumentData target_arg{eArgTypeTargetID, eArgRepeatPlain};
+    m_arguments.push_back({target_arg});
   }
 
   ~CommandObjectTargetSelect() override = default;
@@ -568,6 +573,8 @@ public:
     m_option_group.Append(&m_all_option, LLDB_OPT_SET_ALL, LLDB_OPT_SET_1);
     m_option_group.Append(&m_cleanup_option, LLDB_OPT_SET_ALL, LLDB_OPT_SET_1);
     m_option_group.Finalize();
+    CommandArgumentData target_arg{eArgTypeTargetID, eArgRepeatStar};
+    m_arguments.push_back({target_arg});
   }
 
   ~CommandObjectTargetDelete() override = default;
@@ -1223,10 +1230,6 @@ public:
 protected:
   bool DoExecute(Args &command, CommandReturnObject &result) override {
     Target *target = &GetSelectedTarget();
-    if (command.GetArgumentCount() != 0) {
-      result.AppendError("list takes no arguments\n");
-      return result.Succeeded();
-    }
 
     target->GetImageSearchPathList().Dump(&result.GetOutputStream());
     result.SetStatus(eReturnStatusSuccessFinishResult);
@@ -2447,6 +2450,8 @@ public:
                           LLDB_OPT_SET_1);
     m_option_group.Append(&m_symbol_file, LLDB_OPT_SET_ALL, LLDB_OPT_SET_1);
     m_option_group.Finalize();
+    CommandArgumentData module_arg{eArgTypePath, eArgRepeatStar};
+    m_arguments.push_back({module_arg});
   }
 
   ~CommandObjectTargetModulesAdd() override = default;
@@ -2901,8 +2906,10 @@ public:
   CommandObjectTargetModulesList(CommandInterpreter &interpreter)
       : CommandObjectParsed(
             interpreter, "target modules list",
-            "List current executable and dependent shared library images.",
-            "target modules list [<cmd-options>]") {}
+            "List current executable and dependent shared library images.") {
+    CommandArgumentData module_arg{eArgTypeShlibName, eArgRepeatStar};
+    m_arguments.push_back({module_arg});
+  }
 
   ~CommandObjectTargetModulesList() override = default;
 
@@ -3815,7 +3822,7 @@ public:
 
     default:
       m_options.GenerateOptionUsage(
-          result.GetErrorStream(), this,
+          result.GetErrorStream(), *this,
           GetCommandInterpreter().GetDebugger().GetTerminalWidth());
       syntax_error = true;
       break;
@@ -4010,6 +4017,8 @@ public:
     m_option_group.Append(&m_current_stack_option, LLDB_OPT_SET_2,
                           LLDB_OPT_SET_2);
     m_option_group.Finalize();
+    CommandArgumentData module_arg{eArgTypeShlibName, eArgRepeatPlain};
+    m_arguments.push_back({module_arg});
   }
 
   ~CommandObjectTargetSymbolsAdd() override = default;
@@ -4858,7 +4867,10 @@ public:
   CommandObjectTargetStopHookDelete(CommandInterpreter &interpreter)
       : CommandObjectParsed(interpreter, "target stop-hook delete",
                             "Delete a stop-hook.",
-                            "target stop-hook delete [<idx>]") {}
+                            "target stop-hook delete [<idx>]") {
+    CommandArgumentData hook_arg{eArgTypeStopHookID, eArgRepeatStar};
+    m_arguments.push_back({hook_arg});
+  }
 
   ~CommandObjectTargetStopHookDelete() override = default;
 
@@ -4912,6 +4924,8 @@ public:
                                            bool enable, const char *name,
                                            const char *help, const char *syntax)
       : CommandObjectParsed(interpreter, name, help, syntax), m_enable(enable) {
+    CommandArgumentData hook_arg{eArgTypeStopHookID, eArgRepeatStar};
+    m_arguments.push_back({hook_arg});
   }
 
   ~CommandObjectTargetStopHookEnableDisable() override = default;
@@ -4967,8 +4981,7 @@ class CommandObjectTargetStopHookList : public CommandObjectParsed {
 public:
   CommandObjectTargetStopHookList(CommandInterpreter &interpreter)
       : CommandObjectParsed(interpreter, "target stop-hook list",
-                            "List all stop-hooks.",
-                            "target stop-hook list [<type>]") {}
+                            "List all stop-hooks.", "target stop-hook list") {}
 
   ~CommandObjectTargetStopHookList() override = default;
 
@@ -5040,11 +5053,6 @@ public:
 
 protected:
   bool DoExecute(Args &command, CommandReturnObject &result) override {
-    if (!command.empty()) {
-      result.AppendError("target dump typesystem doesn't take arguments.");
-      return result.Succeeded();
-    }
-
     // Go over every scratch TypeSystem and dump to the command output.
     for (TypeSystem *ts : GetSelectedTarget().GetScratchTypeSystems())
       ts->Dump(result.GetOutputStream().AsRawOstream());
