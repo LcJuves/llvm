@@ -1,20 +1,26 @@
 add_mlir_dialect_library(MLIRQuantTransforms
-  ConvertConst.cpp
-  ConvertSimQuant.cpp
+  LowerQuantOps.cpp
+  StripFuncQuantTypes.cpp
 
   ADDITIONAL_HEADER_DIRS
-  ${MLIR_MAIN_INCLUDE_DIR}/mlir/Dialect/QuantOps/Transforms
+  {$MLIR_MAIN_INCLUDE_DIR}/mlir/Dialect/Quant/Transforms
 
   DEPENDS
-  MLIRQuantPassIncGen
+  MLIRQuantTransformsIncGen
 
   LINK_LIBS PUBLIC
-  MLIRArithmeticDialect
+  MLIRArithDialect
   MLIRFuncDialect
+  MLIRFuncTransforms
+  MLIRIndexDialect
   MLIRIR
-  MLIRQuantDialect
-  MLIRQuantUtils
+  MLIRLinalgDialect
+  MLIRLinalgUtils
   MLIRPass
-  MLIRSupport
+  MLIRQuantDialect
+  MLIRShapeDialect
+  MLIRTensorDialect
+  MLIRTransforms
   MLIRTransformUtils
+
   )

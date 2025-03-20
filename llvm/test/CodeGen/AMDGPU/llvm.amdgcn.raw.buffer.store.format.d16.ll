@@ -14,9 +14,9 @@ main_body:
 
 ; GCN-LABEL: {{^}}buffer_store_format_d16_xy:
 
-; UNPACKED: s_load_dword [[S_DATA:s[0-9]+]], s{{\[[0-9]+:[0-9]+\]}}, 0x10
-; UNPACKED-DAG: s_lshr_b32 [[SHR:s[0-9]+]], [[S_DATA]], 16
-; UNPACKED-DAG: s_and_b32 [[MASKED:s[0-9]+]], [[S_DATA]], 0xffff{{$}}
+; UNPACKED: s_load_dwordx2 s[[[S_DATA:[0-9]+]]:{{[0-9]+}}], s{{\[[0-9]+:[0-9]+\]}}, 0x10
+; UNPACKED-DAG: s_lshr_b32 [[SHR:s[0-9]+]], s[[S_DATA]], 16
+; UNPACKED-DAG: s_and_b32 [[MASKED:s[0-9]+]], s[[S_DATA]], 0xffff{{$}}
 ; UNPACKED-DAG: v_mov_b32_e32 v[[V_LO:[0-9]+]], [[MASKED]]
 ; UNPACKED-DAG: v_mov_b32_e32 v[[V_HI:[0-9]+]], [[SHR]]
 ; UNPACKED: buffer_store_format_d16_xy v[[[V_LO]]:[[V_HI]]], v{{[0-9]+}}, s[{{[0-9]+:[0-9]+}}], 0 offen
@@ -47,7 +47,7 @@ main_body:
 ; PACKED: buffer_store_format_d16_xyz v[[[LO]]:[[HI]]], v{{[0-9]+}}, s[{{[0-9]+:[0-9]+}}], 0 offen
 define amdgpu_kernel void @buffer_store_format_d16_xyz(<4 x i32> %rsrc, <4 x half> %data, i32 %voffset) {
 main_body:
-  %data_subvec = shufflevector <4 x half> %data, <4 x half> undef, <3 x i32> <i32 0, i32 1, i32 2>
+  %data_subvec = shufflevector <4 x half> %data, <4 x half> poison, <3 x i32> <i32 0, i32 1, i32 2>
   call void @llvm.amdgcn.raw.buffer.store.format.v3f16(<3 x half> %data_subvec, <4 x i32> %rsrc, i32 %voffset, i32 0, i32 0)
   ret void
 }

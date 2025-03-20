@@ -18,8 +18,8 @@
 namespace mlir {
 class ModuleOp;
 
-/// Creates a pass to convert Vector Ops to SPIR-V ops.
-std::unique_ptr<OperationPass<ModuleOp>> createConvertVectorToSPIRVPass();
+#define GEN_PASS_DECL_CONVERTVECTORTOSPIRVPASS
+#include "mlir/Conversion/Passes.h.inc"
 
 } // namespace mlir
 

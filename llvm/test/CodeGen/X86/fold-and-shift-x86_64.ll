@@ -5,7 +5,7 @@ define i8 @t1(ptr %X, i64 %i) {
 ; CHECK-LABEL: t1:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    andq $-255, %rsi
-; CHECK-NEXT:    movb (%rdi,%rsi,4), %al
+; CHECK-NEXT:    movzbl (%rdi,%rsi,4), %eax
 ; CHECK-NEXT:    retq
 
 entry:
@@ -20,7 +20,7 @@ define i8 @t2(ptr %X, i64 %i) {
 ; CHECK-LABEL: t2:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    andq $-14, %rsi
-; CHECK-NEXT:    movb (%rdi,%rsi,4), %al
+; CHECK-NEXT:    movzbl (%rdi,%rsi,4), %eax
 ; CHECK-NEXT:    retq
 
 entry:
@@ -35,7 +35,7 @@ define i8 @t3(ptr %X, i64 %i) {
 ; CHECK-LABEL: t3:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    movl %esi, %eax
-; CHECK-NEXT:    movb (%rdi,%rax,4), %al
+; CHECK-NEXT:    movzbl (%rdi,%rax,4), %eax
 ; CHECK-NEXT:    retq
 
 entry:
@@ -50,7 +50,7 @@ define i8 @t4(ptr %X, i64 %i) {
 ; CHECK-LABEL: t4:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    andl $-2, %esi
-; CHECK-NEXT:    movb (%rdi,%rsi,4), %al
+; CHECK-NEXT:    movzbl (%rdi,%rsi,4), %eax
 ; CHECK-NEXT:    retq
 
 entry:
@@ -65,7 +65,7 @@ define i8 @t5(ptr %X, i64 %i) {
 ; CHECK-LABEL: t5:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    andl $-250002, %esi # imm = 0xFFFC2F6E
-; CHECK-NEXT:    movb (%rdi,%rsi,4), %al
+; CHECK-NEXT:    movzbl (%rdi,%rsi,4), %eax
 ; CHECK-NEXT:    retq
 
 entry:
@@ -81,7 +81,7 @@ define i8 @t6(ptr %X, i32 %i) {
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    # kill: def $esi killed $esi def $rsi
 ; CHECK-NEXT:    andl $15, %esi
-; CHECK-NEXT:    movb (%rdi,%rsi,4), %al
+; CHECK-NEXT:    movzbl (%rdi,%rsi,4), %eax
 ; CHECK-NEXT:    retq
 entry:
   %tmp2 = shl i32 %i, 2
@@ -92,3 +92,19 @@ entry:
   ret i8 %tmp9
 }
 
+define i32 @t7(<16 x i8> %a0, ptr %p0) {
+; CHECK-LABEL: t7:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    pmovmskb %xmm0, %eax
+; CHECK-NEXT:    shrl $3, %eax
+; CHECK-NEXT:    movzbl (%rdi,%rax,4), %eax
+; CHECK-NEXT:    retq
+  %i = call i32 @llvm.x86.sse2.pmovmskb.128(<16 x i8> %a0)
+  %index = lshr i32 %i, 1
+  %mask = and i32 %index, 16777212
+  %val.ptr = getelementptr inbounds i8, ptr %p0, i32 %mask
+  %val = load i8, ptr %val.ptr
+  %ext = zext i8 %val to i32
+  ret i32 %ext
+}
+declare i32 @llvm.x86.sse2.pmovmskb.128(<16 x i8>)

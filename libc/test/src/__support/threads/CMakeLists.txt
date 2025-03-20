@@ -1,18 +1,4 @@
-if(NOT (TARGET libc.src.__support.threads.thread AND
-        TARGET libc.src.__support.threads.mutex))
-  return()
+add_custom_target(libc-support-threads-tests)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${LIBC_TARGET_OS})
+  add_subdirectory(${LIBC_TARGET_OS})
 endif()
-
-add_libc_unittest(
-  thread_detach_test
-  SUITE
-  SRCS
-    thread_detach_test.cpp
-  DEPENDS
-    libc.src.__support.threads.mutex
-    libc.src.__support.threads.thread
-    libc.src.__support.threads.thread_attrib
-  COMPILE_OPTIONS
-    -O3
-    -fno-omit-frame-pointer
-)

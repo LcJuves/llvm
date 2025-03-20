@@ -7,7 +7,7 @@ void array_value_a(void) {
   auto [a, b] = arr;
   arr[0] = 0;
 
-  int x = a; // expected-warning{{Assigned value is garbage or undefined}}
+  int x = a; // expected-warning{{Assigned value is uninitialized}}
 }
 
 void array_value_b(void) {
@@ -30,7 +30,7 @@ void array_value_c(void) {
   clang_analyzer_eval(b == arr[1]); // expected-warning{{TRUE}}
 
   int y = b; // no-warning
-  int x = a; // expected-warning{{Assigned value is garbage or undefined}}
+  int x = a; // expected-warning{{Assigned value is uninitialized}}
 }
 
 void array_value_d(void) {
@@ -43,7 +43,7 @@ void array_value_d(void) {
   clang_analyzer_eval(b == arr[1]); // expected-warning{{TRUE}}
 
   int y = b; // no-warning
-  int x = c; // expected-warning{{Assigned value is garbage or undefined}}
+  int x = c; // expected-warning{{Assigned value is uninitialized}}
 }
 
 void array_value_e(void) {
@@ -72,13 +72,13 @@ void array_value_f(void) {
   clang_analyzer_eval(i == 0); // expected-warning{{TRUE}}
 
   int a = i; // no-warning
-  int b = j; // expected-warning{{Assigned value is garbage or undefined}}
+  int b = j; // expected-warning{{Assigned value is uninitialized}}
 }
 
 void array_lref_a(void) {
   int arr[2];
   auto &[a, b] = arr;
-  int x = a; // expected-warning{{Assigned value is garbage or undefined}}
+  int x = a; // expected-warning{{Assigned value is uninitialized}}
 }
 
 void array_lref_b(void) {
@@ -100,7 +100,7 @@ void array_lref_c(void) {
   clang_analyzer_eval(a == 1); // expected-warning{{TRUE}}
 
   int x = a; // no-warning
-  int y = b; // expected-warning{{Assigned value is garbage or undefined}}
+  int y = b; // expected-warning{{Assigned value is uninitialized}}
 }
 
 void array_lref_d(void) {
@@ -113,7 +113,7 @@ void array_lref_d(void) {
   clang_analyzer_eval(b == 1); // expected-warning{{TRUE}}
 
   int y = b; // no-warning
-  int x = a; // expected-warning{{Assigned value is garbage or undefined}}
+  int x = a; // expected-warning{{Assigned value is uninitialized}}
 }
 
 void array_lref_e(void) {
@@ -126,7 +126,7 @@ void array_lref_e(void) {
   clang_analyzer_eval(b == 1); // expected-warning{{TRUE}}
 
   int y = b; // no-warning
-  int x = c; // expected-warning{{Assigned value is garbage or undefined}}
+  int x = c; // expected-warning{{Assigned value is uninitialized}}
 }
 
 void array_lref_f(void) {
@@ -155,13 +155,13 @@ void array_lref_g(void) {
   clang_analyzer_eval(i == 0); // expected-warning{{TRUE}}
 
   int a = i; // no-warning
-  int b = j; // expected-warning{{Assigned value is garbage or undefined}}
+  int b = j; // expected-warning{{Assigned value is uninitialized}}
 }
 
 void array_rref_a(void) {
   int arr[2];
   auto &&[a, b] = arr;
-  int x = a; // expected-warning{{Assigned value is garbage or undefined}}
+  int x = a; // expected-warning{{Assigned value is uninitialized}}
 }
 
 void array_rref_b(void) {
@@ -183,7 +183,7 @@ void array_rref_c(void) {
   clang_analyzer_eval(a == 1); // expected-warning{{TRUE}}
 
   int x = a; // no-warning
-  int y = b; // expected-warning{{Assigned value is garbage or undefined}}
+  int y = b; // expected-warning{{Assigned value is uninitialized}}
 }
 
 void array_rref_d(void) {
@@ -196,7 +196,7 @@ void array_rref_d(void) {
   clang_analyzer_eval(b == 1); // expected-warning{{TRUE}}
 
   int y = b; // no-warning
-  int x = a; // expected-warning{{Assigned value is garbage or undefined}}
+  int x = a; // expected-warning{{Assigned value is uninitialized}}
 }
 
 void array_rref_e(void) {
@@ -209,7 +209,7 @@ void array_rref_e(void) {
   clang_analyzer_eval(b == 1); // expected-warning{{TRUE}}
 
   int y = b; // no-warning
-  int x = c; // expected-warning{{Assigned value is garbage or undefined}}
+  int x = c; // expected-warning{{Assigned value is uninitialized}}
 }
 
 void array_rref_f(void) {
@@ -238,7 +238,7 @@ void array_rref_g(void) {
   clang_analyzer_eval(i == 0); // expected-warning{{TRUE}}
 
   int a = i; // no-warning
-  int b = j; // expected-warning{{Assigned value is garbage or undefined}}
+  int b = j; // expected-warning{{Assigned value is uninitialized}}
 }
 
 void array_change_a(void) {
@@ -276,7 +276,7 @@ void array_small_a(void) {
 
   auto [a, b, c, d, e] = arr;
 
-  int x = e; // expected-warning{{Assigned value is garbage or undefined}}
+  int x = e; // expected-warning{{Assigned value is uninitialized}}
 }
 
 void array_big_a(void) {
@@ -291,4 +291,98 @@ void array_big_a(void) {
   clang_analyzer_eval(d == 4); // expected-warning{{UNKNOWN}}
   clang_analyzer_eval(e == 5); // expected-warning{{UNKNOWN}}
   clang_analyzer_eval(f == 6); // expected-warning{{UNKNOWN}}
+}
+
+struct S {
+  int a = 1;
+  int b = 2;
+};
+
+void non_pod_val(void) {
+  S arr[2];
+
+  auto [x, y] = arr;
+
+  clang_analyzer_eval(x.a == 1); // expected-warning{{TRUE}}
+  clang_analyzer_eval(x.b == 2); // expected-warning{{TRUE}}
+
+  clang_analyzer_eval(y.a == 1); // expected-warning{{TRUE}}
+  clang_analyzer_eval(y.b == 2); // expected-warning{{TRUE}}
+}
+
+void non_pod_val_syntax_2(void) {
+  S arr[2];
+
+  auto [x, y](arr);
+
+  clang_analyzer_eval(x.a == 1); // expected-warning{{TRUE}}
+  clang_analyzer_eval(x.b == 2); // expected-warning{{TRUE}}
+
+  clang_analyzer_eval(y.a == 1); // expected-warning{{TRUE}}
+  clang_analyzer_eval(y.b == 2); // expected-warning{{TRUE}}
+}
+
+void non_pod_lref(void) {
+  S arr[2];
+
+  auto &[x, y] = arr;
+
+  clang_analyzer_eval(x.a == 1); // expected-warning{{TRUE}}
+  clang_analyzer_eval(x.b == 2); // expected-warning{{TRUE}}
+
+  clang_analyzer_eval(y.a == 1); // expected-warning{{TRUE}}
+  clang_analyzer_eval(y.b == 2); // expected-warning{{TRUE}}
+}
+
+void non_pod_rref(void) {
+  S arr[2];
+
+  auto &&[x, y] = arr;
+
+  clang_analyzer_eval(x.a == 1); // expected-warning{{TRUE}}
+  clang_analyzer_eval(x.b == 2); // expected-warning{{TRUE}}
+
+  clang_analyzer_eval(y.a == 1); // expected-warning{{TRUE}}
+  clang_analyzer_eval(y.b == 2); // expected-warning{{TRUE}}
+}
+
+struct SUD {
+  inline static int c = 0;
+
+  int a = 1;
+  int b = 2;
+
+  SUD() { ++c; };
+
+  SUD(const SUD &copy) {
+    a = copy.a + 1;
+    b = copy.b + 1;
+  }
+};
+
+void non_pod_user_defined_val(void) {
+  SUD arr[2];
+
+  auto [x, y] = arr;
+
+  clang_analyzer_eval(x.a == 2); // expected-warning{{TRUE}}
+  clang_analyzer_eval(x.b == 3); // expected-warning{{TRUE}}
+
+  clang_analyzer_eval(y.a == 2); // expected-warning{{TRUE}}
+  clang_analyzer_eval(y.b == 3); // expected-warning{{TRUE}}
+}
+
+void non_pod_user_defined_val_syntax_2(void) {
+  SUD::c = 0;
+  SUD arr[2];
+
+  auto [x, y](arr);
+
+  clang_analyzer_eval(SUD::c == 2); // expected-warning{{TRUE}}
+
+  clang_analyzer_eval(x.a == 2); // expected-warning{{TRUE}}
+  clang_analyzer_eval(x.b == 3); // expected-warning{{TRUE}}
+
+  clang_analyzer_eval(y.a == 2); // expected-warning{{TRUE}}
+  clang_analyzer_eval(y.b == 3); // expected-warning{{TRUE}}
 }

@@ -77,7 +77,7 @@ InFlightDiagnostic Operation::emitOpError();
 ## Diagnostic
 
 A `Diagnostic` in MLIR contains all of the necessary information for reporting a
-message to the user. A `Diagnostic` essentially boils down to three main
+message to the user. A `Diagnostic` essentially boils down to four main
 components:
 
 *   [Source Location](#source-locations)
@@ -85,6 +85,11 @@ components:
     -   Error, Note, Remark, Warning
 *   Diagnostic Arguments
     -   The diagnostic arguments are used when constructing the output message.
+*   Metadata
+    -   Some additional information attached that can be used to identify 
+        this diagnostic other than source location and severity level 
+        (e.g. for diagnostic handlers to do some filtering). 
+        Metadata is not part of the output message.
 
 ### Appending arguments
 
@@ -119,6 +124,14 @@ op->emitError() << anotherOp;
 op->emitRemark() << anotherOp;
 ```
 
+To make a custom type compatible with Diagnostics, one must implement the
+following friend function.
+
+```c++
+friend mlir::Diagnostic &operator<<(
+    mlir::Diagnostic &diagnostic, const MyType &foo);
+```
+
 ### Attaching notes
 
 Unlike many other compiler frameworks, notes in MLIR cannot be emitted directly.
@@ -134,6 +147,11 @@ op->emitError("...").attachNote(noteLoc) << "...";
 // Emit a note that inherits the parent location.
 op->emitError("...").attachNote() << "...";
 ```
+
+### Managing Metadata
+Metadata is a mutable vector of DiagnosticArguments. 
+It can be accessed and modified as a vector. 
+
 
 ## InFlight Diagnostic
 
@@ -300,9 +318,13 @@ This handler is a wrapper around a llvm::SourceMgr that is used to verify that
 certain diagnostics have been emitted to the context. To use this handler,
 annotate your source file with expected diagnostics in the form of:
 
-*   `expected-(error|note|remark|warning) {{ message }}`
+*   `expected-(error|note|remark|warning)(-re)? {{ message }}`
 
-A few examples are shown below:
+The provided `message` is a string expected to be contained within the generated
+diagnostic. The `-re` suffix may be used to enable regex matching within the
+`message`. When present, the `message` may define regex match sequences within
+`{{` `}}` blocks. The regular expression matcher supports Extended POSIX regular
+expressions (ERE). A few examples are shown below:
 
 ```mlir
 // Expect an error on the same line.
@@ -327,6 +349,12 @@ func.func @baz(%a : f32)
 // expected-remark@above {{remark on function above}}
 // expected-remark@above {{another remark on function above}}
 
+// Expect an error mentioning the parent function, but use regex to avoid
+// hardcoding the name.
+func.func @foo() -> i32 {
+  // expected-error-re@+1 {{'func.return' op has 0 operands, but enclosing function (@{{.*}}) returns 1}}
+  return
+}
 ```
 
 The handler will report an error if any unexpected diagnostics were seen, or if

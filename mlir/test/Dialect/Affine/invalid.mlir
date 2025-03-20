@@ -5,7 +5,7 @@
 func.func @affine_apply_operand_non_index(%arg0 : i32) {
   // Custom parser automatically assigns all arguments the `index` so we must
   // use the generic syntax here to exercise the verifier.
-  // expected-error@+1 {{op operand #0 must be index, but got 'i32'}}
+  // expected-error@+1 {{op operand #0 must be variadic of index, but got 'i32'}}
   %0 = "affine.apply"(%arg0) {map = affine_map<(d0) -> (d0)>} : (i32) -> (index)
   return
 }
@@ -21,41 +21,11 @@ func.func @affine_apply_resul_non_index(%arg0 : index) {
 }
 
 // -----
-
-#map = affine_map<(d0)[s0] -> (d0 + s0)>
-
-func.func @affine_for_lower_bound_invalid_dim(%arg : index) {
-  affine.for %n0 = 0 to 7 {
-    %dim = arith.addi %arg, %arg : index
-
-    // expected-error@+1 {{operand cannot be used as a dimension id}}
-    affine.for %n1 = 0 to #map(%dim)[%arg] {
-    }
-  }
-  return
-}
-
-// -----
-
-#map = affine_map<(d0)[s0] -> (d0 + s0)>
-
-func.func @affine_for_upper_bound_invalid_dim(%arg : index) {
-  affine.for %n0 = 0 to 7 {
-    %dim = arith.addi %arg, %arg : index
-
-    // expected-error@+1 {{operand cannot be used as a dimension id}}
-    affine.for %n1 = #map(%dim)[%arg] to 7 {
-    }
-  }
-  return
-}
-
-// -----
 func.func @affine_load_invalid_dim(%M : memref<10xi32>) {
   "unknown"() ({
   ^bb0(%arg: index):
     affine.load %M[%arg] : memref<10xi32>
-    // expected-error@-1 {{index must be a dimension or symbol identifier}}
+    // expected-error@-1 {{op operand cannot be used as a dimension id}}
     cf.br ^bb1
   ^bb1:
     cf.br ^bb1
@@ -85,20 +55,6 @@ func.func @affine_for_upper_bound_invalid_sym() {
     // expected-error@+1 {{operand cannot be used as a symbol}}
     affine.for %n0 = 0 to #map0(%i0)[%i0] {
     }
-  }
-  return
-}
-
-// -----
-
-#set0 = affine_set<(i)[N] : (i >= 0, N - i >= 0)>
-
-func.func @affine_if_invalid_dim(%arg : index) {
-  affine.for %n0 = 0 to 7 {
-    %dim = arith.addi %arg, %arg : index
-
-    // expected-error@+1 {{operand cannot be used as a dimension id}}
-    affine.if #set0(%dim)[%n0] {}
   }
   return
 }
@@ -145,7 +101,7 @@ func.func @affine_store_missing_l_square(%C: memref<4096x4096xf32>) {
 func.func @affine_store_wrong_value_type(%C: memref<f32>) {
   %c0 = arith.constant 0 : i32
   // expected-error@+1 {{value to store must have the same type as memref element type}}
-  "affine.store"(%c0, %C) : (i32, memref<f32>) -> ()
+  "affine.store"(%c0, %C) <{map = affine_map<(i) -> (i)>}> : (i32, memref<f32>) -> ()
   return
 }
 
@@ -178,6 +134,22 @@ func.func @affine_min(%arg0 : index, %arg1 : index, %arg2 : index) {
 
 // -----
 
+func.func @affine_min() {
+  // expected-error@+1 {{'affine.min' op affine map expect at least one result}}
+  %0 = affine.min affine_map<() -> ()> ()
+  return
+}
+
+// -----
+
+func.func @affine_min(%arg0 : index) {
+  // expected-error@+1 {{'affine.min' op affine map expect at least one result}}
+  %0 = affine.min affine_map<(d0) -> ()> (%arg0)
+  return
+}
+
+// -----
+
 func.func @affine_max(%arg0 : index, %arg1 : index, %arg2 : index) {
   // expected-error@+1 {{operand count and affine map dimension and symbol count must match}}
   %0 = affine.max affine_map<(d0) -> (d0)> (%arg0, %arg1)
@@ -200,6 +172,22 @@ func.func @affine_max(%arg0 : index, %arg1 : index, %arg2 : index) {
   // expected-error@+1 {{operand count and affine map dimension and symbol count must match}}
   %0 = affine.max affine_map<(d0) -> (d0)> ()
 
+  return
+}
+
+// -----
+
+func.func @affine_max() {
+  // expected-error@+1 {{'affine.max' op affine map expect at least one result}}
+  %0 = affine.max affine_map<() -> ()> ()
+  return
+}
+
+// -----
+
+func.func @affine_max(%arg0 : index) {
+  // expected-error@+1 {{'affine.max' op affine map expect at least one result}}
+  %0 = affine.max affine_map<(d0) -> ()> (%arg0)
   return
 }
 
@@ -287,10 +275,40 @@ func.func @affine_parallel(%arg0 : index, %arg1 : index, %arg2 : index) {
 
 func.func @affine_parallel(%arg0 : index, %arg1 : index, %arg2 : index) {
   %0 = memref.alloc() : memref<100x100xi32>
-  %1 = affine.parallel (%i, %j) = (0, 0) to (100, 100) step (10, 10) reduce ("minf") -> (f32) {
+  %1 = affine.parallel (%i, %j) = (0, 0) to (100, 100) step (10, 10) reduce ("minimumf") -> (f32) {
     %2 = affine.load %0[%i, %j] : memref<100x100xi32>
     //  expected-error@+1 {{types mismatch between yield op and its parent}}
     affine.yield %2 : i32
+  }
+  return
+}
+
+// -----
+
+func.func @affine_parallel(%arg0 : index, %arg1 : index, %arg2 : index) {
+  %0 = memref.alloc() : memref<100x100xi32>
+  //  expected-error@+1 {{result type cannot match reduction attribute}}
+  %1 = affine.parallel (%i, %j) = (0, 0) to (100, 100) step (10, 10) reduce ("minimumf") -> (i32) {
+    %2 = affine.load %0[%i, %j] : memref<100x100xi32>
+    affine.yield %2 : i32
+  }
+  return
+}
+
+// -----
+
+func.func @no_upper_bound_affine_parallel() {
+  // expected-error@+1 {{expected lower bound map to have at least one result}}
+  affine.parallel (%arg2) = (max()) to (1) {
+  }
+  return
+}
+
+// -----
+
+func.func @no_upper_bound_affine_parallel() {
+  // expected-error@+1 {{expected upper bound map to have at least one result}}
+  affine.parallel (%arg3) = (0) to (min()) {
   }
   return
 }
@@ -387,6 +405,161 @@ func.func @affine_for_iter_args_mismatch(%buffer: memref<1024xf32>) -> f32 {
 func.func @result_number() {
   // expected-error@+1 {{result number not allowed}}
   affine.for %n0#0 = 0 to 7 {
+  }
+  return
+}
+
+// -----
+
+func.func @malformed_for_percent() {
+  affine.for i = 1 to 10 { // expected-error {{expected SSA operand}}
+
+// -----
+
+func.func @malformed_for_equal() {
+  affine.for %i 1 to 10 { // expected-error {{expected '='}}
+
+// -----
+
+func.func @malformed_for_to() {
+  affine.for %i = 1 too 10 { // expected-error {{expected 'to' between bounds}}
+  }
+}
+
+// -----
+
+func.func @incomplete_for() {
+  affine.for %i = 1 to 10 step 2
+}        // expected-error @-1 {{expected '{' to begin a region}}
+
+// -----
+
+#map0 = affine_map<(d0) -> (d0 floordiv 4)>
+
+func.func @reference_to_iv_in_bound() {
+  // expected-error@+2 {{region entry argument '%i0' is already in use}}
+  // expected-note@+1 {{previously referenced here}}
+  affine.for %i0 = #map0(%i0) to 10 {
+  }
+}
+
+// -----
+
+func.func @nonconstant_step(%1 : i32) {
+  affine.for %2 = 1 to 5 step %1 { // expected-error {{expected attribute value}}
+
+// -----
+
+func.func @for_negative_stride() {
+  affine.for %i = 1 to 10 step -1
+}        // expected-error@-1 {{expected step to be representable as a positive signed integer}}
+
+// -----
+
+func.func @invalid_if_conditional2() {
+  affine.for %i = 1 to 10 {
+    affine.if affine_set<(i)[N] : (i >= )>  // expected-error {{expected affine expression}}
+  }
+}
+
+// -----
+
+func.func @invalid_if_conditional3() {
+  affine.for %i = 1 to 10 {
+    affine.if affine_set<(i)[N] : (i == )>  // expected-error {{expected affine expression}}
+  }
+}
+
+// -----
+
+func.func @invalid_if_conditional6() {
+  affine.for %i = 1 to 10 {
+    affine.if affine_set<(i) : (i)> // expected-error {{expected '== affine-expr' or '>= affine-expr' at end of affine constraint}}
+  }
+}
+
+// -----
+// TODO: support affine.if (1)?
+func.func @invalid_if_conditional7() {
+  affine.for %i = 1 to 10 {
+    affine.if affine_set<(i) : (1)> // expected-error {{expected '== affine-expr' or '>= affine-expr' at end of affine constraint}}
+  }
+}
+
+// -----
+
+func.func @missing_for_max(%arg0: index, %arg1: index, %arg2: memref<100xf32>) {
+  // expected-error @+1 {{lower loop bound affine map with multiple results requires 'max' prefix}}
+  affine.for %i0 = affine_map<()[s]->(0,s-1)>()[%arg0] to %arg1 {
+  }
+  return
+}
+
+// -----
+
+func.func @missing_for_min(%arg0: index, %arg1: index, %arg2: memref<100xf32>) {
+  // expected-error @+1 {{upper loop bound affine map with multiple results requires 'min' prefix}}
+  affine.for %i0 = %arg0 to affine_map<()[s]->(100,s+1)>()[%arg1] {
+  }
+  return
+}
+
+// -----
+
+func.func @delinearize(%idx: index, %basis0: index, %basis1 :index) {
+  // expected-error@+1 {{'affine.delinearize_index' op should return an index for each basis element and up to one extra index}}
+  %1 = affine.delinearize_index %idx into (%basis0, %basis1) : index
+  return
+}
+
+// -----
+
+func.func @delinearize(%idx: index) {
+  // expected-error@+1 {{'affine.delinearize_index' op no basis element may be statically non-positive}}
+  %1:2 = affine.delinearize_index %idx into (2, -2) : index, index
+  return
+}
+
+// -----
+
+func.func @linearize(%idx: index, %basis0: index, %basis1 :index) -> index {
+  // expected-error@+1 {{'affine.linearize_index' op should be passed a basis element for each index except possibly the first}}
+  %0 = affine.linearize_index [%idx] by (%basis0, %basis1) : index
+  return %0 : index
+}
+
+// -----
+
+func.func @dynamic_dimension_index() {
+  "unknown.region"() ({
+    %idx = "unknown.test"() : () -> (index)
+    %memref = "unknown.test"() : () -> memref<?x?xf32>
+    %dim = memref.dim %memref, %idx : memref<?x?xf32>
+    // expected-error@below {{op operand cannot be used as a dimension id}}
+    affine.load %memref[%dim, %dim] : memref<?x?xf32>
+    "unknown.terminator"() : () -> ()
+  }) : () -> ()
+  return
+}
+
+// -----
+
+#map = affine_map<() -> ()>
+#map1 = affine_map<() -> (1)>
+func.func @no_lower_bound() {
+  // expected-error@+1 {{'affine.for' op expected lower bound map to have at least one result}}
+  affine.for %i = max #map() to min #map1() {
+  }
+  return
+}
+
+// -----
+
+#map = affine_map<() -> ()>
+#map1 = affine_map<() -> (1)>
+func.func @no_upper_bound() {
+  // expected-error@+1 {{'affine.for' op expected upper bound map to have at least one result}}
+  affine.for %i = max #map1() to min #map() {
   }
   return
 }

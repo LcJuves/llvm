@@ -13,6 +13,7 @@
 #ifndef LLVM_LIB_CODEGEN_SELECTIONDAG_SDNODEDBGVALUE_H
 #define LLVM_LIB_CODEGEN_SELECTIONDAG_SDNODEDBGVALUE_H
 
+#include "llvm/CodeGen/Register.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/DataTypes.h"
@@ -63,7 +64,7 @@ public:
   }
 
   /// Returns the Virtual Register for a VReg
-  unsigned getVReg() const {
+  Register getVReg() const {
     assert(kind == VREG);
     return u.VReg;
   }
@@ -74,8 +75,8 @@ public:
   static SDDbgOperand fromFrameIdx(unsigned FrameIdx) {
     return SDDbgOperand(FrameIdx, FRAMEIX);
   }
-  static SDDbgOperand fromVReg(unsigned VReg) {
-    return SDDbgOperand(VReg, VREG);
+  static SDDbgOperand fromVReg(Register VReg) {
+    return SDDbgOperand(VReg.id(), VREG);
   }
   static SDDbgOperand fromConst(const Value *Const) {
     return SDDbgOperand(Const);
@@ -230,7 +231,7 @@ public:
   bool isEmitted() const { return Emitted; }
 
   /// clearIsEmitted - Reset Emitted flag, for certain special cases where
-  /// dbg.addr is emitted twice.
+  /// SDDbgValue is emitted twice. DBG_INSTR_REF depends on this behaviour.
   void clearIsEmitted() { Emitted = false; }
 
   LLVM_DUMP_METHOD void dump() const;

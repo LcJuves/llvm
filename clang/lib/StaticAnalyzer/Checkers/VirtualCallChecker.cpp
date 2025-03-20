@@ -116,7 +116,7 @@ void VirtualCallChecker::checkPreCall(const CallEvent &Call,
   if (!ObState)
     return;
 
-  bool IsPure = MD->isPure();
+  bool IsPure = MD->isPureVirtual();
 
   // At this point we're sure that we're calling a virtual method
   // during construction or destruction, so we'll emit a report.
@@ -214,14 +214,11 @@ void ento::registerPureVirtualCallChecker(CheckerManager &Mgr) {
 
 void ento::registerVirtualCallChecker(CheckerManager &Mgr) {
   auto *Chk = Mgr.getChecker<VirtualCallChecker>();
-  if (!Mgr.getAnalyzerOptions().getCheckerBooleanOption(
-          Mgr.getCurrentCheckerName(), "PureOnly")) {
-    Chk->BT_Impure = std::make_unique<BugType>(
-        Mgr.getCurrentCheckerName(), "Unexpected loss of virtual dispatch",
-        categories::CXXObjectLifecycle);
-    Chk->ShowFixIts = Mgr.getAnalyzerOptions().getCheckerBooleanOption(
-        Mgr.getCurrentCheckerName(), "ShowFixIts");
-  }
+  Chk->BT_Impure = std::make_unique<BugType>(
+      Mgr.getCurrentCheckerName(), "Unexpected loss of virtual dispatch",
+      categories::CXXObjectLifecycle);
+  Chk->ShowFixIts = Mgr.getAnalyzerOptions().getCheckerBooleanOption(
+      Mgr.getCurrentCheckerName(), "ShowFixIts");
 }
 
 bool ento::shouldRegisterVirtualCallModeling(const CheckerManager &mgr) {

@@ -15,14 +15,11 @@
 #define LLVM_CODEGEN_MACHINECYCLEANALYSIS_H
 
 #include "llvm/ADT/GenericCycleInfo.h"
-#include "llvm/CodeGen/MachineSSAContext.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
-#include "llvm/InitializePasses.h"
+#include "llvm/CodeGen/MachinePassManager.h"
+#include "llvm/CodeGen/MachineSSAContext.h"
 
 namespace llvm {
-
-extern template class GenericCycleInfo<MachineSSAContext>;
-extern template class GenericCycle<MachineSSAContext>;
 
 using MachineCycleInfo = GenericCycleInfo<MachineSSAContext>;
 using MachineCycle = MachineCycleInfo::CycleT;
@@ -49,6 +46,27 @@ public:
 // TODO: add this function to GenericCycle template after implementing IR
 //       version.
 bool isCycleInvariant(const MachineCycle *Cycle, MachineInstr &I);
+
+class MachineCycleAnalysis : public AnalysisInfoMixin<MachineCycleAnalysis> {
+  friend AnalysisInfoMixin<MachineCycleAnalysis>;
+  static AnalysisKey Key;
+
+public:
+  using Result = MachineCycleInfo;
+
+  Result run(MachineFunction &MF, MachineFunctionAnalysisManager &MFAM);
+};
+
+class MachineCycleInfoPrinterPass
+    : public PassInfoMixin<MachineCycleInfoPrinterPass> {
+  raw_ostream &OS;
+
+public:
+  explicit MachineCycleInfoPrinterPass(raw_ostream &OS) : OS(OS) {}
+  PreservedAnalyses run(MachineFunction &MF,
+                        MachineFunctionAnalysisManager &MFAM);
+  static bool isRequired() { return true; }
+};
 
 } // end namespace llvm
 

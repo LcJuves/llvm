@@ -2,10 +2,11 @@
 remove_module_flags()
 include_directories(..)
 
-add_lldb_library(lldbHostMacOSXObjCXX
+add_lldb_library(lldbHostMacOSXObjCXX NO_PLUGIN_DEPENDENCIES
   Host.mm
   HostInfoMacOSX.mm
   HostThreadMacOSX.mm
+  MemoryMonitorMacOSX.mm
 
   LINK_LIBS
     lldbUtility
@@ -13,6 +14,9 @@ add_lldb_library(lldbHostMacOSXObjCXX
 
   LINK_COMPONENTS
     Support
+    TargetParser
   )
 
-target_compile_options(lldbHostMacOSXObjCXX PRIVATE -fno-objc-exceptions)
+target_compile_options(lldbHostMacOSXObjCXX PRIVATE
+  -fno-objc-exceptions
+  -Wno-deprecated-declarations)

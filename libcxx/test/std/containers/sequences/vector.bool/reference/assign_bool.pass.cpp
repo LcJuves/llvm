@@ -15,12 +15,12 @@
 
 #include "test_macros.h"
 
-bool test() {
+TEST_CONSTEXPR_CXX20 bool test() {
   std::vector<bool> vec;
   typedef std::vector<bool>::reference Ref;
   vec.push_back(true);
   vec.push_back(false);
-  Ref ref = vec[0];
+  Ref ref        = vec[0];
   const Ref cref = vec[0];
 
   assert(ref);
@@ -47,6 +47,9 @@ bool test() {
 
 int main(int, char**) {
   test();
+#if TEST_STD_VER > 17
+  static_assert(test());
+#endif
 
   return 0;
 }

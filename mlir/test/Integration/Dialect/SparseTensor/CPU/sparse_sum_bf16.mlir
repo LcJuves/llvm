@@ -1,13 +1,41 @@
-// RUN: mlir-opt %s --sparse-compiler | \
-// RUN: mlir-cpu-runner \
-// RUN:  -e entry -entry-point-result=void  \
-// RUN:  -shared-libs=%mlir_integration_test_dir/libmlir_c_runner_utils%shlibext | \
-// RUN: FileCheck %s
+//--------------------------------------------------------------------------------------------------
+// WHEN CREATING A NEW TEST, PLEASE JUST COPY & PASTE WITHOUT EDITS.
+//
+// Set-up that's shared across all tests in this directory. In principle, this
+// config could be moved to lit.local.cfg. However, there are downstream users that
+//  do not use these LIT config files. Hence why this is kept inline.
+//
+// DEFINE: %{sparsifier_opts} = enable-runtime-library=true
+// DEFINE: %{sparsifier_opts_sve} = enable-arm-sve=true %{sparsifier_opts}
+// DEFINE: %{compile} = mlir-opt %s --sparsifier="%{sparsifier_opts}"
+// DEFINE: %{compile_sve} = mlir-opt %s --sparsifier="%{sparsifier_opts_sve}"
+// DEFINE: %{run_libs} = -shared-libs=%mlir_c_runner_utils,%mlir_runner_utils
+// DEFINE: %{run_libs_sve} = -shared-libs=%native_mlir_runner_utils,%native_mlir_c_runner_utils
+// DEFINE: %{run_opts} = -e main -entry-point-result=void
+// DEFINE: %{run} = mlir-runner %{run_opts} %{run_libs}
+// DEFINE: %{run_sve} = %mcr_aarch64_cmd --march=aarch64 --mattr="+sve" %{run_opts} %{run_libs_sve}
+//
+// DEFINE: %{env} =
+//--------------------------------------------------------------------------------------------------
+// RUN: %{compile} | %{run} | FileCheck %s
+//
+// Do the same run, but now with direct IR generation.
+// REDEFINE: %{sparsifier_opts} = enable-runtime-library=false
+// RUN: %{compile} | %{run} | FileCheck %s
+//
+// Do the same run, but now with vectorization.
+// REDEFINE: %{sparsifier_opts} = enable-runtime-library=false vl=2 reassociate-fp-reductions=true enable-index-optimizations=true
+// RUN: %{compile} | %{run} | FileCheck %s
+//
+// Do the same run, but now with  VLA vectorization.
+// RUN: %if mlir_arm_sve_tests %{ %{compile_sve} | %{run_sve} | FileCheck %s %}
 
-!Filename = !llvm.ptr<i8>
+// UNSUPPORTED: target=aarch64{{.*}}, mlir_arm_emulator
+
+!Filename = !llvm.ptr
 
 #SparseMatrix = #sparse_tensor.encoding<{
-  dimLevelType = [ "compressed", "compressed" ]
+  map = (d0, d1) -> (d0 : compressed, d1 : compressed)
 }>
 
 #trait_sum_reduce = {
@@ -24,7 +52,7 @@ module {
   // A kernel that sum-reduces a matrix to a single scalar.
   //
   func.func @kernel_sum_reduce(%arga: tensor<?x?xbf16, #SparseMatrix>,
-                          %argx: tensor<bf16> {linalg.inplaceable = true}) -> tensor<bf16> {
+                               %argx: tensor<bf16>) -> tensor<bf16> {
     %0 = linalg.generic #trait_sum_reduce
       ins(%arga: tensor<?x?xbf16, #SparseMatrix>)
       outs(%argx: tensor<bf16>) {
@@ -40,7 +68,7 @@ module {
   //
   // Main driver that reads matrix from file and calls the sparse kernel.
   //
-  func.func @entry() {
+  func.func @main() {
     // Setup input sparse matrix from compressed constant.
     %d = arith.constant dense <[
        [ 1.1,  1.2,  0.0,  1.4 ],
@@ -52,9 +80,7 @@ module {
     %d0 = arith.constant 0.0 : bf16
     // Setup memory for a single reduction scalar,
     // initialized to zero.
-    %xdata = memref.alloc() : memref<bf16>
-    memref.store %d0, %xdata[] : memref<bf16>
-    %x = bufferization.to_tensor %xdata : memref<bf16>
+    %x = tensor.from_elements %d0 : tensor<bf16>
 
     // Call the kernel.
     %0 = call @kernel_sum_reduce(%a, %x)
@@ -64,14 +90,13 @@ module {
     //
     // CHECK: 13.5
     //
-    %m = bufferization.to_memref %0 : memref<bf16>
-    %v = memref.load %m[] : memref<bf16>
+    %v = tensor.extract %0[] : tensor<bf16>
     %vf = arith.extf %v: bf16 to f32
     vector.print %vf : f32
 
     // Release the resources.
-    memref.dealloc %xdata : memref<bf16>
-    sparse_tensor.release %a : tensor<?x?xbf16, #SparseMatrix>
+    bufferization.dealloc_tensor %a : tensor<?x?xbf16, #SparseMatrix>
+    bufferization.dealloc_tensor %0 : tensor<bf16>
 
     return
   }

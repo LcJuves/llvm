@@ -9,6 +9,7 @@
 #ifndef LLDB_TARGET_TRACE_H
 #define LLDB_TARGET_TRACE_H
 
+#include <optional>
 #include <unordered_map>
 
 #include "llvm/Support/JSON.h"
@@ -56,21 +57,24 @@ public:
   ///     A stream object to dump the information to.
   virtual void Dump(Stream *s) const = 0;
 
-  /// Save the trace of a live process to the specified directory, which
-  /// will be created if needed.
-  /// This will also create a a file \a <directory>/trace.json with the main
-  /// properties of the trace session, along with others files which contain
-  /// the actual trace data. The trace.json file can be used later as input
-  /// for the "trace load" command to load the trace in LLDB.
-  /// The process being trace is not a live process, return an error.
+  /// Save the trace to the specified directory, which will be created if
+  /// needed. This will also create a file \a <directory>/trace.json with the
+  /// main properties of the trace session, along with others files which
+  /// contain the actual trace data. The trace.json file can be used later as
+  /// input for the "trace load" command to load the trace in LLDB.
   ///
   /// \param[in] directory
   ///   The directory where the trace files will be saved.
   ///
+  /// \param[in] compact
+  ///   Try not to save to disk information irrelevant to the traced processes.
+  ///   Each trace plug-in implements this in a different fashion.
+  ///
   /// \return
-  ///   \a llvm::success if the operation was successful, or an \a llvm::Error
-  ///   otherwise.
-  virtual llvm::Error SaveLiveTraceToDisk(FileSpec directory) = 0;
+  ///   A \a FileSpec pointing to the bundle description file, or an \a
+  ///   llvm::Error otherwise.
+  virtual llvm::Expected<FileSpec> SaveToDisk(FileSpec directory,
+                                              bool compact) = 0;
 
   /// Find a trace plug-in using JSON data.
   ///
@@ -166,9 +170,9 @@ public:
   /// Get a \a TraceCursor for the given thread's trace.
   ///
   /// \return
-  ///     A \a TraceCursorUP. If the thread is not traced or its trace
+  ///     A \a TraceCursorSP. If the thread is not traced or its trace
   ///     information failed to load, an \a llvm::Error is returned.
-  virtual llvm::Expected<lldb::TraceCursorUP>
+  virtual llvm::Expected<lldb::TraceCursorSP>
   CreateNewCursor(Thread &thread) = 0;
 
   /// Dump general info about a given thread's trace. Each Trace plug-in
@@ -183,7 +187,8 @@ public:
   /// \param[in] verbose
   ///     If \b true, print detailed info
   ///     If \b false, print compact info
-  virtual void DumpTraceInfo(Thread &thread, Stream &s, bool verbose) = 0;
+  virtual void DumpTraceInfo(Thread &thread, Stream &s, bool verbose,
+                             bool json) = 0;
 
   /// Check if a thread is currently traced by this object.
   ///
@@ -460,19 +465,19 @@ protected:
   GetLiveProcessBinaryData(llvm::StringRef kind);
 
   /// Get the size of the data returned by \a GetLiveThreadBinaryData
-  llvm::Optional<uint64_t> GetLiveThreadBinaryDataSize(lldb::tid_t tid,
-                                                       llvm::StringRef kind);
+  std::optional<uint64_t> GetLiveThreadBinaryDataSize(lldb::tid_t tid,
+                                                      llvm::StringRef kind);
 
   /// Get the size of the data returned by \a GetLiveCpuBinaryData
-  llvm::Optional<uint64_t> GetLiveCpuBinaryDataSize(lldb::cpu_id_t cpu_id,
-                                                    llvm::StringRef kind);
+  std::optional<uint64_t> GetLiveCpuBinaryDataSize(lldb::cpu_id_t cpu_id,
+                                                   llvm::StringRef kind);
 
   /// Get the size of the data returned by \a GetLiveProcessBinaryData
-  llvm::Optional<uint64_t> GetLiveProcessBinaryDataSize(llvm::StringRef kind);
+  std::optional<uint64_t> GetLiveProcessBinaryDataSize(llvm::StringRef kind);
 
   /// Constructor for post mortem processes
   Trace(llvm::ArrayRef<lldb::ProcessSP> postmortem_processes,
-        llvm::Optional<std::vector<lldb::cpu_id_t>> postmortem_cpus);
+        std::optional<std::vector<lldb::cpu_id_t>> postmortem_cpus);
 
   /// Constructor for a live process
   Trace(Process &live_process) : m_live_process(&live_process) {}
@@ -565,9 +570,9 @@ private:
     llvm::DenseMap<ConstString, uint64_t> live_process_data;
     /// \}
 
-    /// The list of cpus being traced. Might be \b None depending on the
+    /// The list of cpus being traced. Might be \b std::nullopt depending on the
     /// plug-in.
-    llvm::Optional<std::vector<lldb::cpu_id_t>> cpus;
+    std::optional<std::vector<lldb::cpu_id_t>> cpus;
 
     /// Postmortem traces can specific additional data files, which are
     /// represented in this variable using a data kind identifier for each file.
@@ -583,7 +588,7 @@ private:
 
     /// \}
 
-    llvm::Optional<std::string> live_refresh_error;
+    std::optional<std::string> live_refresh_error;
   } m_storage;
 
   /// Get the storage after refreshing the data in the case of a live process.

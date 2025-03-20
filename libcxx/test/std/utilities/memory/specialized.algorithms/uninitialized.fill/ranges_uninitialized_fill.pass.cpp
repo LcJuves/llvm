@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03, c++11, c++14, c++17
-// UNSUPPORTED: libcpp-has-no-incomplete-ranges
 
 // <memory>
 
@@ -198,35 +197,6 @@ int main(int, char**) {
     Counted::reset();
   }
 #endif // TEST_HAS_NO_EXCEPTIONS
-
-  // Works with const iterators, (iter, sentinel) overload.
-  {
-    constexpr int N = 5;
-    Buffer<Counted, N> buf;
-
-    std::ranges::uninitialized_fill(buf.cbegin(), buf.cend(), x);
-    assert(Counted::current_objects == N);
-    assert(Counted::total_objects == N);
-    assert(std::all_of(buf.begin(), buf.end(), pred));
-
-    std::destroy(buf.begin(), buf.end());
-    Counted::reset();
-  }
-
-  // Works with const iterators, (range) overload.
-  {
-    constexpr int N = 5;
-    Buffer<Counted, N> buf;
-
-    auto range = std::ranges::subrange(buf.cbegin(), buf.cend());
-    std::ranges::uninitialized_fill(range, x);
-    assert(Counted::current_objects == N);
-    assert(Counted::total_objects == N);
-    assert(std::all_of(buf.begin(), buf.end(), pred));
-
-    std::destroy(buf.begin(), buf.end());
-    Counted::reset();
-  }
 
   return 0;
 }

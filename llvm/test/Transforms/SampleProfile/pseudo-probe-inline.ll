@@ -50,7 +50,7 @@ while.cond:
 
 while.body:
 ; CHECK: call void @llvm.pseudoprobe(i64 [[#GUID2]], i64 3, i32 0, i64 -1)
-  %0 = load volatile i32, i32* @factor, align 4, !dbg !32
+  %0 = load volatile i32, ptr @factor, align 4, !dbg !32
   %sub = sub nsw i32 %x.addr.0, %0, !dbg !39
   br label %while.cond, !dbg !31
 
@@ -62,7 +62,7 @@ while.cond2:
 
 while.body4:
 ; CHECK: call void @llvm.pseudoprobe(i64 [[#GUID2]], i64 5, i32 0, i64 -1)
-  %1 = load volatile i32, i32* @factor, align 4, !dbg !45
+  %1 = load volatile i32, ptr @factor, align 4, !dbg !45
   %add = add nsw i32 %x.addr.1, %1, !dbg !48
   br label %while.cond2, !dbg !44
 
@@ -98,7 +98,7 @@ if.end:
 ;YAML-NEXT:    - String:          '(cost='
 ;YAML-NEXT:    - Cost:            '15'
 ;YAML-NEXT:    - String:          ', threshold='
-;YAML-NEXT:    - Threshold:       '2147483647'
+;YAML-NEXT:    - Threshold:       '3000'
 ;YAML-NEXT:    - String:          ')'
 ;YAML-NEXT:    - String:          ' at callsite '
 ;YAML-NEXT:    - String:          foo

@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03, c++11, c++14, c++17
-// UNSUPPORTED: libcpp-has-no-incomplete-ranges
 
 // array
 
@@ -17,7 +16,6 @@
 #include <ranges>
 
 using range = std::array<int, 10>;
-
 
 static_assert(!std::ranges::view<range>);
 static_assert(std::same_as<std::ranges::iterator_t<range>, range::iterator>);

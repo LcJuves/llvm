@@ -81,7 +81,8 @@ define i32 @undef(i1 %cond, i32 %v) {
 ; CHECK:       B:
 ; CHECK-NEXT:    br label [[EXIT]]
 ; CHECK:       EXIT:
-; CHECK-NEXT:    ret i32 [[V:%.*]]
+; CHECK-NEXT:    [[W:%.*]] = phi i32 [ [[V:%.*]], [[A]] ], [ undef, [[B]] ]
+; CHECK-NEXT:    ret i32 [[W]]
 ;
   br i1 %cond, label %A, label %B
 A:
@@ -141,7 +142,7 @@ define i8 @only_poison(i1 %cond) {
 ; CHECK:       B:
 ; CHECK-NEXT:    br label [[EXIT]]
 ; CHECK:       EXIT:
-; CHECK-NEXT:    ret i8 undef
+; CHECK-NEXT:    ret i8 poison
 ;
   br i1 %cond, label %A, label %B
 A:
@@ -153,66 +154,36 @@ EXIT:
   ret i8 %r
 }
 
-@g = extern_weak global i32
-
-define i64 @pr49839_with_poison(i1 %c) {
-; CHECK-LABEL: @pr49839_with_poison(
+; Should not fold srem to -1 due to incorrect context instruction when
+; threading over phi.
+define i32 @pr61312() {
+; CHECK-LABEL: @pr61312(
 ; CHECK-NEXT:  entry:
-; CHECK-NEXT:    br i1 [[C:%.*]], label [[IF:%.*]], label [[JOIN:%.*]]
-; CHECK:       if:
-; CHECK-NEXT:    br label [[JOIN]]
-; CHECK:       join:
-; CHECK-NEXT:    [[PHI:%.*]] = phi i64 [ poison, [[IF]] ], [ srem (i64 1, i64 ptrtoint (ptr @g to i64)), [[ENTRY:%.*]] ]
-; CHECK-NEXT:    ret i64 [[PHI]]
+; CHECK-NEXT:    br label [[FOR_COND:%.*]]
+; CHECK:       for.cond:
+; CHECK-NEXT:    [[A_0:%.*]] = phi i32 [ 2, [[ENTRY:%.*]] ], [ [[DEC:%.*]], [[FOR_INC:%.*]] ]
+; CHECK-NEXT:    [[CMP:%.*]] = icmp sge i32 [[A_0]], 0
+; CHECK-NEXT:    br i1 [[CMP]], label [[FOR_INC]], label [[FOR_END:%.*]]
+; CHECK:       for.inc:
+; CHECK-NEXT:    [[DEC]] = add nsw i32 [[A_0]], -1
+; CHECK-NEXT:    br label [[FOR_COND]]
+; CHECK:       for.end:
+; CHECK-NEXT:    [[REM:%.*]] = srem i32 -1, [[A_0]]
+; CHECK-NEXT:    ret i32 [[REM]]
 ;
 entry:
-  br i1 %c, label %if, label %join
+  br label %for.cond
 
-if:
-  br label %join
+for.cond:
+  %a.0 = phi i32 [ 2, %entry ], [ %dec, %for.inc ]
+  %cmp = icmp sge i32 %a.0, 0
+  br i1 %cmp, label %for.inc, label %for.end
 
-join:
-  %phi = phi i64 [ poison, %if ], [ srem (i64 1, i64 ptrtoint (ptr @g to i64)) , %entry ]
-  ret i64 %phi
-}
+for.inc:
+  %dec = add nsw i32 %a.0, -1
+  br label %for.cond
 
-define i64 @pr49839_without_poison(i1 %c) {
-; CHECK-LABEL: @pr49839_without_poison(
-; CHECK-NEXT:  entry:
-; CHECK-NEXT:    br i1 [[C:%.*]], label [[IF:%.*]], label [[JOIN:%.*]]
-; CHECK:       if:
-; CHECK-NEXT:    br label [[JOIN]]
-; CHECK:       join:
-; CHECK-NEXT:    ret i64 srem (i64 1, i64 ptrtoint (ptr @g to i64))
-;
-entry:
-  br i1 %c, label %if, label %join
-
-if:
-  br label %join
-
-join:
-  %phi = phi i64 [ srem (i64 1, i64 ptrtoint (ptr @g to i64)), %if ], [ srem (i64 1, i64 ptrtoint (ptr @g to i64)) , %entry ]
-  ret i64 %phi
-}
-
-define <1 x i64> @pr49839_vector(i1 %c) {
-; CHECK-LABEL: @pr49839_vector(
-; CHECK-NEXT:  entry:
-; CHECK-NEXT:    br i1 [[C:%.*]], label [[IF:%.*]], label [[JOIN:%.*]]
-; CHECK:       if:
-; CHECK-NEXT:    br label [[JOIN]]
-; CHECK:       join:
-; CHECK-NEXT:    [[PHI:%.*]] = phi <1 x i64> [ poison, [[IF]] ], [ <i64 srem (i64 1, i64 ptrtoint (ptr @g to i64))>, [[ENTRY:%.*]] ]
-; CHECK-NEXT:    ret <1 x i64> [[PHI]]
-;
-entry:
-  br i1 %c, label %if, label %join
-
-if:
-  br label %join
-
-join:
-  %phi = phi <1 x i64> [ poison, %if ], [ <i64 srem (i64 1, i64 ptrtoint (ptr @g to i64))>, %entry ]
-  ret <1 x i64> %phi
+for.end:
+  %rem = srem i32 -1, %a.0
+  ret i32 %rem
 }

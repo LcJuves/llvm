@@ -5,12 +5,12 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
-
-#include <algorithm>
 
 using namespace llvm;
 
@@ -27,7 +27,7 @@ int main(int argc, char *argv[]) {
   std::vector<std::pair<llvm::UTF32, SmallVector<llvm::UTF32>>> Entries;
   SmallVector<StringRef> Values;
   for (StringRef Line : Lines) {
-    if (Line.startswith("#"))
+    if (Line.starts_with("#"))
       continue;
 
     Values.clear();
@@ -38,14 +38,14 @@ int main(int argc, char *argv[]) {
     }
 
     llvm::StringRef From = Values[0].trim();
-    llvm::UTF32 CodePoint;
+    llvm::UTF32 CodePoint = 0;
     From.getAsInteger(16, CodePoint);
 
     SmallVector<llvm::UTF32> To;
     SmallVector<StringRef> ToN;
     Values[1].split(ToN, ' ', -1, false);
     for (StringRef To_ : ToN) {
-      llvm::UTF32 ToCodePoint;
+      llvm::UTF32 ToCodePoint = 0;
       To_.trim().getAsInteger(16, ToCodePoint);
       To.push_back(ToCodePoint);
     }
@@ -54,7 +54,7 @@ int main(int argc, char *argv[]) {
 
     Entries.emplace_back(CodePoint, To);
   }
-  std::sort(Entries.begin(), Entries.end());
+  llvm::sort(Entries);
 
   unsigned LargestValue =
       std::max_element(Entries.begin(), Entries.end(),

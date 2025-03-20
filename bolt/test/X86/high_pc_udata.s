@@ -15,8 +15,8 @@
 # POSTCHECK-NEXT: DW_AT_name [DW_FORM_strp]
 # POSTCHECK-SAME: "main.cpp"
 
-# Testing that BOLT transforms DW_AT_high_pc of form DW_FORM_udata correctly into DW_AT_ranges.
-# Manually changed so that DW_AT_high_pc is DW_FORM_udata, and that DW_AT_name is after it.
+## Testing that BOLT transforms DW_AT_high_pc of form DW_FORM_udata correctly into DW_AT_ranges.
+## Manually changed so that DW_AT_high_pc is DW_FORM_udata, and that DW_AT_name is after it.
 # int main() {
 #    return 0;
 # }
@@ -124,7 +124,7 @@ main:                                   # @main
 	.long	.Linfo_string3                  # DW_AT_name
 	.byte	1                               # DW_AT_decl_file
 	.byte	1                               # DW_AT_decl_line
-	.long	67                              # DW_AT_type
+	.long	64                              # DW_AT_type
                                         # DW_AT_external
 	.byte	3                               # Abbrev [3] 0x43:0x7 DW_TAG_base_type
 	.long	.Linfo_string4                  # DW_AT_name

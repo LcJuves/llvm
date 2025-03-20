@@ -1,4 +1,4 @@
-//===-- RISCVMCAsmInfo.cpp - RISCV Asm properties -------------------------===//
+//===-- RISCVMCAsmInfo.cpp - RISC-V Asm properties ------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -12,10 +12,16 @@
 
 #include "RISCVMCAsmInfo.h"
 #include "MCTargetDesc/RISCVMCExpr.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/BinaryFormat/Dwarf.h"
+#include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCStreamer.h"
+#include "llvm/TargetParser/Triple.h"
 using namespace llvm;
+
+const MCAsmInfo::VariantKindDesc variantKindDescs[] = {
+    {MCSymbolRefExpr::VK_GOTPCREL, "GOTPCREL"},
+    {MCSymbolRefExpr::VK_PLT, "PLT"},
+};
 
 void RISCVMCAsmInfo::anchor() {}
 
@@ -27,6 +33,8 @@ RISCVMCAsmInfo::RISCVMCAsmInfo(const Triple &TT) {
   ExceptionsType = ExceptionHandling::DwarfCFI;
   Data16bitsDirective = "\t.half\t";
   Data32bitsDirective = "\t.word\t";
+
+  initializeVariantKinds(variantKindDescs);
 }
 
 const MCExpr *RISCVMCAsmInfo::getExprForFDESymbol(const MCSymbol *Sym,
@@ -40,8 +48,7 @@ const MCExpr *RISCVMCAsmInfo::getExprForFDESymbol(const MCSymbol *Sym,
   // enabled, so we follow binutils in using the R_RISCV_32_PCREL relocation
   // for the FDE initial location.
   MCContext &Ctx = Streamer.getContext();
-  const MCExpr *ME =
-      MCSymbolRefExpr::create(Sym, MCSymbolRefExpr::VK_None, Ctx);
+  const MCExpr *ME = MCSymbolRefExpr::create(Sym, Ctx);
   assert(Encoding & dwarf::DW_EH_PE_sdata4 && "Unexpected encoding");
-  return RISCVMCExpr::create(ME, RISCVMCExpr::VK_RISCV_32_PCREL, Ctx);
+  return RISCVMCExpr::create(ME, RISCVMCExpr::VK_32_PCREL, Ctx);
 }

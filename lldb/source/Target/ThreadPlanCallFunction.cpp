@@ -104,7 +104,10 @@ ThreadPlanCallFunction::ThreadPlanCallFunction(
       m_ignore_breakpoints(options.DoesIgnoreBreakpoints()),
       m_debug_execution(options.GetDebug()),
       m_trap_exceptions(options.GetTrapExceptions()), m_function_addr(function),
-      m_function_sp(0), m_takedown_done(false),
+      m_start_addr(), m_function_sp(0), m_subplan_sp(),
+      m_cxx_language_runtime(nullptr), m_objc_language_runtime(nullptr),
+      m_stored_thread_state(), m_real_stop_info_sp(), m_constructor_errors(),
+      m_return_valobj_sp(), m_takedown_done(false),
       m_should_clear_objc_exception_bp(false),
       m_should_clear_cxx_exception_bp(false),
       m_stop_address(LLDB_INVALID_ADDRESS), m_return_type(return_type) {
@@ -134,7 +137,10 @@ ThreadPlanCallFunction::ThreadPlanCallFunction(
       m_ignore_breakpoints(options.DoesIgnoreBreakpoints()),
       m_debug_execution(options.GetDebug()),
       m_trap_exceptions(options.GetTrapExceptions()), m_function_addr(function),
-      m_function_sp(0), m_takedown_done(false),
+      m_start_addr(), m_function_sp(0), m_subplan_sp(),
+      m_cxx_language_runtime(nullptr), m_objc_language_runtime(nullptr),
+      m_stored_thread_state(), m_real_stop_info_sp(), m_constructor_errors(),
+      m_return_valobj_sp(), m_takedown_done(false),
       m_should_clear_objc_exception_bp(false),
       m_should_clear_cxx_exception_bp(false),
       m_stop_address(LLDB_INVALID_ADDRESS), m_return_type(CompilerType()) {}
@@ -157,7 +163,7 @@ void ThreadPlanCallFunction::ReportRegisterState(const char *message) {
          reg_idx < num_registers; ++reg_idx) {
       const RegisterInfo *reg_info = reg_ctx->GetRegisterInfoAtIndex(reg_idx);
       if (reg_ctx->ReadRegister(reg_info, reg_value)) {
-        DumpRegisterValue(reg_value, &strm, reg_info, true, false,
+        DumpRegisterValue(reg_value, strm, *reg_info, true, false,
                           eFormatDefault);
         strm.EOL();
       }
@@ -168,8 +174,20 @@ void ThreadPlanCallFunction::ReportRegisterState(const char *message) {
 
 void ThreadPlanCallFunction::DoTakedown(bool success) {
   Log *log = GetLog(LLDBLog::Step);
+  Thread &thread = GetThread();
 
   if (!m_valid) {
+    // If ConstructorSetup was succesfull but PrepareTrivialCall was not,
+    // we will have a saved register state and potentially modified registers.
+    // Restore those.
+    if (m_stored_thread_state.register_backup_sp)
+      if (!thread.RestoreRegisterStateFromCheckpoint(m_stored_thread_state))
+        LLDB_LOGF(
+            log,
+            "ThreadPlanCallFunction(%p): Failed to restore register state from "
+            "invalid plan that contained a saved register state.",
+            static_cast<void *>(this));
+
     // Don't call DoTakedown if we were never valid to begin with.
     LLDB_LOGF(log,
               "ThreadPlanCallFunction(%p): Log called on "
@@ -179,7 +197,6 @@ void ThreadPlanCallFunction::DoTakedown(bool success) {
   }
 
   if (!m_takedown_done) {
-    Thread &thread = GetThread();
     if (success) {
       SetReturnValue();
     }
@@ -285,10 +302,10 @@ bool ThreadPlanCallFunction::DoPlanExplainsStop(Event *event_ptr) {
     BreakpointSiteSP bp_site_sp;
     bp_site_sp = m_process.GetBreakpointSiteList().FindByID(break_site_id);
     if (bp_site_sp) {
-      uint32_t num_owners = bp_site_sp->GetNumberOfOwners();
+      uint32_t num_owners = bp_site_sp->GetNumberOfConstituents();
       bool is_internal = true;
       for (uint32_t i = 0; i < num_owners; i++) {
-        Breakpoint &bp = bp_site_sp->GetOwnerAtIndex(i)->GetBreakpoint();
+        Breakpoint &bp = bp_site_sp->GetConstituentAtIndex(i)->GetBreakpoint();
         LLDB_LOGF(log,
                   "ThreadPlanCallFunction::PlanExplainsStop: hit "
                   "breakpoint %d while calling function",

@@ -19,9 +19,8 @@ namespace bolt {
 
 bool ThreeWayBranch::shouldRunOnFunction(BinaryFunction &Function) {
   BinaryContext &BC = Function.getBinaryContext();
-  BinaryFunction::BasicBlockOrderType BlockLayout = Function.getLayout();
-  for (BinaryBasicBlock *BB : BlockLayout)
-    for (MCInst &Inst : *BB)
+  for (const BinaryBasicBlock &BB : Function)
+    for (const MCInst &Inst : BB)
       if (BC.MIB->isPacked(Inst))
         return false;
   return true;
@@ -32,7 +31,8 @@ void ThreeWayBranch::runOnFunction(BinaryFunction &Function) {
   MCContext *Ctx = BC.Ctx.get();
   // New blocks will be added and layout will change,
   // so make a copy here to iterate over the original layout
-  BinaryFunction::BasicBlockOrderType BlockLayout = Function.getLayout();
+  BinaryFunction::BasicBlockOrderType BlockLayout(
+      Function.getLayout().block_begin(), Function.getLayout().block_end());
   for (BinaryBasicBlock *BB : BlockLayout) {
     // The block must be hot
     if (BB->getExecutionCount() == 0 ||
@@ -147,7 +147,7 @@ void ThreeWayBranch::runOnFunction(BinaryFunction &Function) {
   }
 }
 
-void ThreeWayBranch::runOnFunctions(BinaryContext &BC) {
+Error ThreeWayBranch::runOnFunctions(BinaryContext &BC) {
   for (auto &It : BC.getBinaryFunctions()) {
     BinaryFunction &Function = It.second;
     if (!shouldRunOnFunction(Function))
@@ -155,8 +155,9 @@ void ThreeWayBranch::runOnFunctions(BinaryContext &BC) {
     runOnFunction(Function);
   }
 
-  outs() << "BOLT-INFO: number of three way branches order changed: "
-         << BranchesAltered << "\n";
+  BC.outs() << "BOLT-INFO: number of three way branches order changed: "
+            << BranchesAltered << "\n";
+  return Error::success();
 }
 
 } // end namespace bolt

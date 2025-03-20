@@ -44,6 +44,7 @@ struct PlatformInfo;
 class ConcatInputSection;
 class Symbol;
 class Defined;
+class AliasSymbol;
 struct Reloc;
 enum class RefState : uint8_t;
 
@@ -120,6 +121,7 @@ public:
 
   std::vector<Symbol *> symbols;
   std::vector<Section *> sections;
+  ArrayRef<uint8_t> objCImageInfo;
 
   // If not empty, this stores the name of the archive containing this file.
   // We use this string for creating error messages.
@@ -138,6 +140,9 @@ protected:
 
   InputFile(Kind, const llvm::MachO::InterfaceFile &);
 
+  // If true, this input's arch is compatible with target.
+  bool compatArch = true;
+
 private:
   const Kind fileKind;
   const StringRef name;
@@ -155,9 +160,13 @@ struct FDE {
 class ObjFile final : public InputFile {
 public:
   ObjFile(MemoryBufferRef mb, uint32_t modTime, StringRef archiveName,
-          bool lazy = false);
+          bool lazy = false, bool forceHidden = false, bool compatArch = true,
+          bool builtFromBitcode = false);
   ArrayRef<llvm::MachO::data_in_code_entry> getDataInCode() const;
+  ArrayRef<uint8_t> getOptimizationHints() const;
   template <class LP> void parse();
+  template <class LP>
+  void parseLinkerOptions(llvm::SmallVectorImpl<StringRef> &LinkerOptions);
 
   static bool classof(const InputFile *f) { return f->kind() == ObjKind; }
 
@@ -170,10 +179,12 @@ public:
   std::unique_ptr<lld::DWARFCache> dwarfCache;
   Section *addrSigSection = nullptr;
   const uint32_t modTime;
+  bool forceHidden;
+  bool builtFromBitcode;
   std::vector<ConcatInputSection *> debugSections;
   std::vector<CallGraphEntry> callGraph;
   llvm::DenseMap<ConcatInputSection *, FDE> fdes;
-  std::vector<OptimizationHint> optimizationHints;
+  std::vector<AliasSymbol *> aliases;
 
 private:
   llvm::once_flag initDwarf;
@@ -184,12 +195,11 @@ private:
                     ArrayRef<typename LP::nlist> nList, const char *strtab,
                     bool subsectionsViaSymbols);
   template <class NList>
-  Symbol *parseNonSectionSymbol(const NList &sym, StringRef name);
+  Symbol *parseNonSectionSymbol(const NList &sym, const char *strtab);
   template <class SectionHeader>
   void parseRelocations(ArrayRef<SectionHeader> sectionHeaders,
                         const SectionHeader &, Section &);
   void parseDebugInfo();
-  void parseOptimizationHints(ArrayRef<uint8_t> data);
   void splitEhFrames(ArrayRef<uint8_t> dataArr, Section &ehFrameSection);
   void registerCompactUnwind(Section &compactUnwindSection);
   void registerEhFrames(Section &ehFrameSection);
@@ -217,10 +227,13 @@ public:
   explicit DylibFile(const llvm::MachO::InterfaceFile &interface,
                      DylibFile *umbrella, bool isBundleLoader,
                      bool explicitlyLinked);
+  explicit DylibFile(DylibFile *umbrella);
 
   void parseLoadCommands(MemoryBufferRef mb);
   void parseReexports(const llvm::MachO::InterfaceFile &interface);
   bool isReferenced() const { return numReferencedSymbols > 0; }
+  bool isExplicitlyLinked() const;
+  void setExplicitlyLinked() { explicitlyLinked = true; }
 
   static bool classof(const InputFile *f) { return f->kind() == DylibKind; }
 
@@ -228,6 +241,7 @@ public:
   DylibFile *exportingFile = nullptr;
   DylibFile *umbrella;
   SmallVector<StringRef, 2> rpaths;
+  SmallVector<StringRef> allowableClients;
   uint32_t compatibilityVersion = 0;
   uint32_t currentVersion = 0;
   int64_t ordinal = 0; // Ordinal numbering starts from 1, so 0 is a sentinel
@@ -237,19 +251,34 @@ public:
   bool forceNeeded = false;
   bool forceWeakImport = false;
   bool deadStrippable = false;
-  bool explicitlyLinked = false;
+
+private:
+  bool explicitlyLinked = false; // Access via isExplicitlyLinked().
+
+public:
   // An executable can be used as a bundle loader that will load the output
   // file being linked, and that contains symbols referenced, but not
   // implemented in the bundle. When used like this, it is very similar
   // to a dylib, so we've used the same class to represent it.
   bool isBundleLoader;
 
+  // Synthetic Dylib objects created by $ld$previous symbols in this dylib.
+  // Usually empty. These synthetic dylibs won't have synthetic dylibs
+  // themselves.
+  SmallVector<DylibFile *, 2> extraDylibs;
+
 private:
+  DylibFile *getSyntheticDylib(StringRef installName, uint32_t currentVersion,
+                               uint32_t compatVersion);
+
   bool handleLDSymbol(StringRef originalName);
   void handleLDPreviousSymbol(StringRef name, StringRef originalName);
   void handleLDInstallNameSymbol(StringRef name, StringRef originalName);
   void handleLDHideSymbol(StringRef name, StringRef originalName);
   void checkAppExtensionSafety(bool dylibIsAppExtensionSafe) const;
+  void parseExportedSymbols(uint32_t offset, uint32_t size);
+  void loadReexport(StringRef path, DylibFile *umbrella,
+                    const llvm::MachO::InterfaceFile *currentTopLevelTapi);
 
   llvm::DenseSet<llvm::CachedHashStringRef> hiddenSymbols;
 };
@@ -257,7 +286,8 @@ private:
 // .a file
 class ArchiveFile final : public InputFile {
 public:
-  explicit ArchiveFile(std::unique_ptr<llvm::object::Archive> &&file);
+  explicit ArchiveFile(std::unique_ptr<llvm::object::Archive> &&file,
+                       bool forceHidden);
   void addLazySymbols();
   void fetch(const llvm::object::Archive::Symbol &);
   // LLD normally doesn't use Error for error-handling, but the underlying
@@ -271,16 +301,20 @@ private:
   // Keep track of children fetched from the archive by tracking
   // which address offsets have been fetched already.
   llvm::DenseSet<uint64_t> seen;
+  // Load all symbols with hidden visibility (-load_hidden).
+  bool forceHidden;
 };
 
 class BitcodeFile final : public InputFile {
 public:
   explicit BitcodeFile(MemoryBufferRef mb, StringRef archiveName,
-                       uint64_t offsetInArchive, bool lazy = false);
+                       uint64_t offsetInArchive, bool lazy = false,
+                       bool forceHidden = false, bool compatArch = true);
   static bool classof(const InputFile *f) { return f->kind() == BitcodeKind; }
   void parse();
 
   std::unique_ptr<llvm::lto::InputFile> obj;
+  bool forceHidden;
 
 private:
   void parseLazy();
@@ -288,8 +322,9 @@ private:
 
 extern llvm::SetVector<InputFile *> inputFiles;
 extern llvm::DenseMap<llvm::CachedHashStringRef, MemoryBufferRef> cachedReads;
+extern llvm::SmallVector<StringRef> unprocessedLCLinkerOptions;
 
-llvm::Optional<MemoryBufferRef> readFile(StringRef path);
+std::optional<MemoryBufferRef> readFile(StringRef path);
 
 void extract(InputFile &file, StringRef reason);
 
@@ -331,6 +366,7 @@ std::vector<const CommandType *> findCommands(const void *anyHdr,
   return detail::findCommands<CommandType>(anyHdr, 0, types...);
 }
 
+std::string replaceThinLTOSuffix(StringRef path);
 } // namespace macho
 
 std::string toString(const macho::InputFile *file);

@@ -1,13 +1,17 @@
 // RUN: %clang_cc1 -fexperimental-strict-floating-point -ffp-exception-behavior=strict -triple %itanium_abi_triple -emit-llvm %s -o - | FileCheck --check-prefixes=CHECK,STRICT %s
+// RUN: %clang_cc1 -fexperimental-strict-floating-point -frounding-math -ffp-exception-behavior=strict -triple %itanium_abi_triple -emit-llvm %s -o - | FileCheck --check-prefixes=CHECK,STRICT-RND %s
 // RUN: %clang_cc1 -fexperimental-strict-floating-point -ffp-exception-behavior=strict -triple %itanium_abi_triple -emit-llvm %s -o - -fms-extensions -DMS | FileCheck --check-prefixes=CHECK,STRICT %s
+// RUN: %clang_cc1 -fexperimental-strict-floating-point -frounding-math -ffp-exception-behavior=strict -triple %itanium_abi_triple -emit-llvm %s -o - -fms-extensions -DMS | FileCheck --check-prefixes=CHECK,STRICT-RND %s
 // RUN: %clang_cc1 -fexperimental-strict-floating-point -triple %itanium_abi_triple -emit-llvm %s -o - | FileCheck --check-prefixes=CHECK,DEFAULT %s
-
+// RUN: %clang_cc1 -fexperimental-strict-floating-point -frounding-math -triple %itanium_abi_triple -emit-llvm %s -o - | FileCheck --check-prefixes=CHECK,DEFAULT-RND %s
 
 float func_00(float x, float y) {
   return x + y;
 }
 // CHECK-LABEL: @func_00
 // STRICT: call float @llvm.experimental.constrained.fadd.f32(float {{.*}}, float {{.*}}, metadata !"round.tonearest", metadata !"fpexcept.strict")
+// STRICT-RND: call float @llvm.experimental.constrained.fadd.f32(float {{.*}}, float {{.*}}, metadata !"round.dynamic", metadata !"fpexcept.strict")
+// DEFAULT-RND: call float @llvm.experimental.constrained.fadd.f32(float {{.*}}, float {{.*}}, metadata !"round.dynamic", metadata !"fpexcept.ignore")
 // DEFAULT: fadd float
 
 
@@ -224,3 +228,26 @@ float func_18(float x, float y) {
 // STRICT: call float @llvm.experimental.constrained.fadd.f32(float {{.*}}, float {{.*}}, metadata !"round.tonearest", metadata !"fpexcept.strict")
 // DEFAULT: fadd float
 
+#pragma STDC FENV_ACCESS ON
+float func_19(float x, float y) {
+  return x + y;
+}
+// CHECK-LABEL: @func_19
+// STRICT:  call float @llvm.experimental.constrained.fadd.f32(float {{.*}}, float {{.*}}, metadata !"round.dynamic", metadata !"fpexcept.strict")
+
+#pragma STDC FENV_ACCESS OFF
+float func_20(float x, float y) {
+  return x + y;
+}
+// CHECK-LABEL: @func_20
+// STRICT: call float @llvm.experimental.constrained.fadd.f32(float {{.*}}, float {{.*}}, metadata !"round.tonearest", metadata !"fpexcept.strict")
+// DEFAULT: fadd float
+
+typedef double vector4double __attribute__((__vector_size__(32)));
+typedef float  vector4float  __attribute__((__vector_size__(16)));
+vector4float func_21(vector4double x) {
+  #pragma STDC FENV_ROUND FE_UPWARD
+  return __builtin_convertvector(x, vector4float);
+}
+// CHECK-LABEL: @func_21
+// STRICT: call <4 x float> @llvm.experimental.constrained.fptrunc.v4f32.v4f64(<4 x double> {{.*}}, metadata !"round.upward", metadata !"fpexcept.strict")

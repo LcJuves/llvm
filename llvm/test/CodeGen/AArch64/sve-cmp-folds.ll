@@ -8,9 +8,7 @@ define <vscale x 8 x i1> @not_icmp_sle_nxv8i16(<vscale x 8 x i16> %a, <vscale x 
 ; CHECK-NEXT:    cmpgt p0.h, p0/z, z0.h, z1.h
 ; CHECK-NEXT:    ret
   %icmp = icmp sle <vscale x 8 x i16> %a, %b
-  %tmp = insertelement <vscale x 8 x i1> undef, i1 true, i32 0
-  %ones = shufflevector <vscale x 8 x i1> %tmp, <vscale x 8 x i1> undef, <vscale x 8 x i32> zeroinitializer
-  %not = xor <vscale x 8 x i1> %ones, %icmp
+  %not = xor <vscale x 8 x i1> splat(i1 true), %icmp
   ret <vscale x 8 x i1> %not
 }
 
@@ -21,9 +19,7 @@ define <vscale x 4 x i1> @not_icmp_sgt_nxv4i32(<vscale x 4 x i32> %a, <vscale x 
 ; CHECK-NEXT:    cmpge p0.s, p0/z, z1.s, z0.s
 ; CHECK-NEXT:    ret
   %icmp = icmp sgt <vscale x 4 x i32> %a, %b
-  %tmp = insertelement <vscale x 4 x i1> undef, i1 true, i32 0
-  %ones = shufflevector <vscale x 4 x i1> %tmp, <vscale x 4 x i1> undef, <vscale x 4 x i32> zeroinitializer
-  %not = xor <vscale x 4 x i1> %icmp, %ones
+  %not = xor <vscale x 4 x i1> %icmp, splat(i1 true)
   ret <vscale x 4 x i1> %not
 }
 
@@ -34,9 +30,7 @@ define <vscale x 2 x i1> @not_fcmp_une_nxv2f64(<vscale x 2 x double> %a, <vscale
 ; CHECK-NEXT:    fcmeq p0.d, p0/z, z0.d, z1.d
 ; CHECK-NEXT:    ret
   %icmp = fcmp une <vscale x 2 x double> %a, %b
-  %tmp = insertelement <vscale x 2 x i1> undef, i1 true, i32 0
-  %ones = shufflevector <vscale x 2 x i1> %tmp, <vscale x 2 x i1> undef, <vscale x 2 x i32> zeroinitializer
-  %not = xor <vscale x 2 x i1> %icmp, %ones
+  %not = xor <vscale x 2 x i1> %icmp, splat(i1 true)
   ret <vscale x 2 x i1> %not
 }
 
@@ -47,10 +41,52 @@ define <vscale x 4 x i1> @not_fcmp_uge_nxv4f32(<vscale x 4 x float> %a, <vscale 
 ; CHECK-NEXT:    fcmgt p0.s, p0/z, z1.s, z0.s
 ; CHECK-NEXT:    ret
   %icmp = fcmp uge <vscale x 4 x float> %a, %b
-  %tmp = insertelement <vscale x 4 x i1> undef, i1 true, i32 0
-  %ones = shufflevector <vscale x 4 x i1> %tmp, <vscale x 4 x i1> undef, <vscale x 4 x i32> zeroinitializer
-  %not = xor <vscale x 4 x i1> %icmp, %ones
+  %not = xor <vscale x 4 x i1> %icmp, splat(i1 true)
   ret <vscale x 4 x i1> %not
+}
+
+define <vscale x 16 x i8> @icmp_cnot_nxv16i8(<vscale x 16 x i8> %a) {
+; CHECK-LABEL: icmp_cnot_nxv16i8:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    ptrue p0.b
+; CHECK-NEXT:    cnot z0.b, p0/m, z0.b
+; CHECK-NEXT:    ret
+  %mask = icmp eq <vscale x 16 x i8> %a, zeroinitializer
+  %zext = zext <vscale x 16 x i1> %mask to <vscale x 16 x i8>
+  ret <vscale x 16 x i8> %zext
+}
+
+define <vscale x 8 x i16> @icmp_cnot_nxv8i16(<vscale x 8 x i16> %a) {
+; CHECK-LABEL: icmp_cnot_nxv8i16:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    ptrue p0.h
+; CHECK-NEXT:    cnot z0.h, p0/m, z0.h
+; CHECK-NEXT:    ret
+  %mask = icmp eq <vscale x 8 x i16> %a, zeroinitializer
+  %zext = zext <vscale x 8 x i1> %mask to <vscale x 8 x i16>
+  ret <vscale x 8 x i16> %zext
+}
+
+define <vscale x 4 x i32> @icmp_cnot_nxv4i32(<vscale x 4 x i32> %a) {
+; CHECK-LABEL: icmp_cnot_nxv4i32:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    ptrue p0.s
+; CHECK-NEXT:    cnot z0.s, p0/m, z0.s
+; CHECK-NEXT:    ret
+  %mask = icmp eq <vscale x 4 x i32> %a, zeroinitializer
+  %zext = zext <vscale x 4 x i1> %mask to <vscale x 4 x i32>
+  ret <vscale x 4 x i32> %zext
+}
+
+define <vscale x 2 x i64> @icmp_cnot_nxv2i64(<vscale x 2 x i64> %a) {
+; CHECK-LABEL: icmp_cnot_nxv2i64:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    ptrue p0.d
+; CHECK-NEXT:    cnot z0.d, p0/m, z0.d
+; CHECK-NEXT:    ret
+  %mask = icmp eq <vscale x 2 x i64> %a, zeroinitializer
+  %zext = zext <vscale x 2 x i1> %mask to <vscale x 2 x i64>
+  ret <vscale x 2 x i64> %zext
 }
 
 define i1 @foo_first(<vscale x 4 x float> %a, <vscale x 4 x float> %b) {
@@ -70,9 +106,12 @@ define i1 @foo_last(<vscale x 4 x float> %a, <vscale x 4 x float> %b) {
 ; CHECK-LABEL: foo_last:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    ptrue p0.s
-; CHECK-NEXT:    fcmeq p1.s, p0/z, z0.s, z1.s
-; CHECK-NEXT:    ptest p0, p1.b
-; CHECK-NEXT:    cset w0, lo
+; CHECK-NEXT:    mov x8, #-1 // =0xffffffffffffffff
+; CHECK-NEXT:    fcmeq p0.s, p0/z, z0.s, z1.s
+; CHECK-NEXT:    mov z0.s, p0/z, #1 // =0x1
+; CHECK-NEXT:    whilels p0.s, xzr, x8
+; CHECK-NEXT:    lastb w8, p0, z0.s
+; CHECK-NEXT:    and w0, w8, #0x1
 ; CHECK-NEXT:    ret
   %vcond = fcmp oeq <vscale x 4 x float> %a, %b
   %vscale = call i64 @llvm.vscale.i64()

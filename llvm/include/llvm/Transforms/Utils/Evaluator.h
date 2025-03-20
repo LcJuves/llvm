@@ -55,15 +55,15 @@ class Evaluator {
     ~MutableValue() { clear(); }
 
     Type *getType() const {
-      if (auto *C = Val.dyn_cast<Constant *>())
+      if (auto *C = dyn_cast_if_present<Constant *>(Val))
         return C->getType();
-      return Val.get<MutableAggregate *>()->Ty;
+      return cast<MutableAggregate *>(Val)->Ty;
     }
 
     Constant *toConstant() const {
-      if (auto *C = Val.dyn_cast<Constant *>())
+      if (auto *C = dyn_cast_if_present<Constant *>(Val))
         return C;
-      return Val.get<MutableAggregate *>()->toConstant();
+      return cast<MutableAggregate *>(Val)->toConstant();
     }
 
     Constant *read(Type *Ty, APInt Offset, const DataLayout &DL) const;
@@ -101,7 +101,7 @@ public:
 
   DenseMap<GlobalVariable *, Constant *> getMutatedInitializers() const {
     DenseMap<GlobalVariable *, Constant *> Result;
-    for (auto &Pair : MutatedMemory)
+    for (const auto &Pair : MutatedMemory)
       Result[Pair.first] = Pair.second.toConstant();
     return Result;
   }
@@ -124,9 +124,6 @@ private:
   void setVal(Value *V, Constant *C) {
     ValueStack.back()[V] = C;
   }
-
-  /// Casts call result to a type of bitcast call expression
-  Constant *castCallResultIfNeeded(Type *ReturnType, Constant *RV);
 
   /// Given call site return callee and list of its formal arguments
   Function *getCalleeWithFormalArgs(CallBase &CB,

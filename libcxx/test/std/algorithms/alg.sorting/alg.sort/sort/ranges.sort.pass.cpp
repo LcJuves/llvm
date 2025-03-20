@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03, c++11, c++14, c++17
-// UNSUPPORTED: libcpp-has-no-incomplete-ranges
 
 // <algorithm>
 
@@ -29,7 +28,6 @@
 #include <ranges>
 
 #include "almost_satisfies_types.h"
-#include "boolean_testable.h"
 #include "test_iterators.h"
 
 // SFINAE tests.
@@ -59,7 +57,7 @@ static_assert(!HasSortR<UncheckedRange<int*, SentinelForNotWeaklyEqualityCompara
 static_assert(!HasSortR<UncheckedRange<int*>, BadComparator>);
 static_assert(!HasSortR<UncheckedRange<const int*>>); // Doesn't satisfy `sortable`.
 
-template <class Iter, class Sent, size_t N>
+template <class Iter, class Sent, std::size_t N>
 constexpr void test_one(std::array<int, N> input, std::array<int, N> expected) {
   { // (iterator, sentinel) overload.
     auto sorted = input;
@@ -185,25 +183,29 @@ constexpr bool test() {
     }
   }
 
-  { // The comparator can return any type that's convertible to `bool`.
-    {
-      std::array in = {2, 1, 3};
-      auto last = std::ranges::sort(in.begin(), in.end(), [](int i, int j) { return BooleanTestable{i < j}; });
-      assert((in == std::array{1, 2, 3}));
-      assert(last == in.end());
-    }
-
-    {
-      std::array in = {2, 1, 3};
-      auto last = std::ranges::sort(in, [](int i, int j) { return BooleanTestable{i < j}; });
-      assert((in == std::array{1, 2, 3}));
-      assert(last == in.end());
-    }
-  }
-
   { // `std::ranges::dangling` is returned.
     [[maybe_unused]] std::same_as<std::ranges::dangling> decltype(auto) result = std::ranges::sort(std::array{1, 2, 3});
   }
+
+  // TODO: Enable the tests once the implementation switched to use iter_move/iter_swap
+  /*
+  { // ProxyIterator
+    {
+      std::array in = {2, 1, 3};
+      ProxyRange proxy{in};
+
+      std::ranges::sort(proxy.begin(), proxy.end(), [](auto i, auto j) { return i.data < j.data; });
+      assert((in == std::array{1, 2, 3}));
+    }
+
+    {
+      std::array in = {2, 1, 3};
+      ProxyRange proxy{in};
+      std::ranges::sort(proxy, [](auto i, auto j) { return i.data < j.data; });
+      assert((in == std::array{1, 2, 3}));
+    }
+  }
+  */
 
   return true;
 }

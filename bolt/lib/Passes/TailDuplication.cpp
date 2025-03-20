@@ -15,6 +15,7 @@
 #include "llvm/MC/MCRegisterInfo.h"
 
 #include <numeric>
+#include <queue>
 
 #define DEBUG_TYPE "taildup"
 
@@ -25,7 +26,7 @@ namespace opts {
 extern cl::OptionCategory BoltOptCategory;
 extern cl::opt<bool> NoThreads;
 
-cl::opt<bolt::TailDuplication::DuplicationMode> TailDuplicationMode(
+static cl::opt<bolt::TailDuplication::DuplicationMode> TailDuplicationMode(
     "tail-duplication",
     cl::desc("duplicate unconditional branches that cross a cache line"),
     cl::init(bolt::TailDuplication::TD_NONE),
@@ -235,7 +236,7 @@ void TailDuplication::constantAndCopyPropagate(
         break;
     }
 
-    // If the register was replaced everwhere and it was overwritten in either
+    // If the register was replaced everywhere and it was overwritten in either
     // one of the iterated through blocks or one of the successor blocks, delete
     // the original move instruction
     if (ReplacedEverywhere &&
@@ -256,14 +257,12 @@ bool TailDuplication::isInCacheLine(const BinaryBasicBlock &BB,
   if (&BB == &Succ)
     return true;
 
-  BinaryFunction::BasicBlockOrderType BlockLayout =
-      BB.getFunction()->getLayout();
   uint64_t Distance = 0;
   int Direction = (Succ.getLayoutIndex() > BB.getLayoutIndex()) ? 1 : -1;
 
   for (unsigned I = BB.getLayoutIndex() + Direction; I != Succ.getLayoutIndex();
        I += Direction) {
-    Distance += BlockLayout[I]->getOriginalSize();
+    Distance += BB.getFunction()->getLayout().getBlock(I)->getOriginalSize();
     if (Distance > opts::TailDuplicationMinimumOffset)
       return false;
   }
@@ -277,7 +276,7 @@ TailDuplication::moderateDuplicate(BinaryBasicBlock &BB,
   // The block must be hot
   if (BB.getKnownExecutionCount() == 0)
     return BlocksToDuplicate;
-  // and its sucessor is not already in the same cache line
+  // and its successor is not already in the same cache line
   if (isInCacheLine(BB, Tail))
     return BlocksToDuplicate;
   // and its size do not exceed the maximum allowed size
@@ -300,11 +299,11 @@ TailDuplication::aggressiveDuplicate(BinaryBasicBlock &BB,
   // The block must be hot
   if (BB.getKnownExecutionCount() == 0)
     return BlocksToDuplicate;
-  // and its sucessor is not already in the same cache line
+  // and its successor is not already in the same cache line
   if (isInCacheLine(BB, Tail))
     return BlocksToDuplicate;
 
-  BinaryBasicBlock *CurrBB = &BB;
+  BinaryBasicBlock *CurrBB = &Tail;
   while (CurrBB) {
     LLVM_DEBUG(dbgs() << "Aggressive tail duplication: adding "
                       << CurrBB->getName() << " to duplication list\n";);
@@ -410,15 +409,15 @@ bool TailDuplication::cacheScoreImproved(const MCCodeEmitter *Emitter,
                                          BinaryBasicBlock *Pred,
                                          BinaryBasicBlock *Tail) const {
   // Collect (estimated) basic block sizes
-  DenseMap<BinaryBasicBlock *, uint64_t> BBSize;
-  for (BinaryBasicBlock *BB : BF.layout()) {
-    BBSize[BB] = std::max<uint64_t>(BB->estimateSize(Emitter), 1);
+  DenseMap<const BinaryBasicBlock *, uint64_t> BBSize;
+  for (const BinaryBasicBlock &BB : BF) {
+    BBSize[&BB] = std::max<uint64_t>(BB.estimateSize(Emitter), 1);
   }
 
   // Build current addresses of basic blocks starting at the entry block
   DenseMap<BinaryBasicBlock *, uint64_t> CurAddr;
   uint64_t Addr = 0;
-  for (BinaryBasicBlock *SrcBB : BF.layout()) {
+  for (BinaryBasicBlock *SrcBB : BF.getLayout().blocks()) {
     CurAddr[SrcBB] = Addr;
     Addr += BBSize[SrcBB];
   }
@@ -426,7 +425,7 @@ bool TailDuplication::cacheScoreImproved(const MCCodeEmitter *Emitter,
   // Build new addresses (after duplication) starting at the entry block
   DenseMap<BinaryBasicBlock *, uint64_t> NewAddr;
   Addr = 0;
-  for (BinaryBasicBlock *SrcBB : BF.layout()) {
+  for (BinaryBasicBlock *SrcBB : BF.getLayout().blocks()) {
     NewAddr[SrcBB] = Addr;
     Addr += BBSize[SrcBB];
     if (SrcBB == Pred)
@@ -435,7 +434,7 @@ bool TailDuplication::cacheScoreImproved(const MCCodeEmitter *Emitter,
 
   // Compute the cache score for the existing layout of basic blocks
   double CurScore = 0;
-  for (BinaryBasicBlock *SrcBB : BF.layout()) {
+  for (BinaryBasicBlock *SrcBB : BF.getLayout().blocks()) {
     auto BI = SrcBB->branch_info_begin();
     for (BinaryBasicBlock *DstBB : SrcBB->successors()) {
       if (SrcBB != DstBB) {
@@ -448,7 +447,7 @@ bool TailDuplication::cacheScoreImproved(const MCCodeEmitter *Emitter,
 
   // Compute the cache score for the layout of blocks after tail duplication
   double NewScore = 0;
-  for (BinaryBasicBlock *SrcBB : BF.layout()) {
+  for (BinaryBasicBlock *SrcBB : BF.getLayout().blocks()) {
     auto BI = SrcBB->branch_info_begin();
     for (BinaryBasicBlock *DstBB : SrcBB->successors()) {
       if (SrcBB != DstBB) {
@@ -489,7 +488,7 @@ TailDuplication::cacheDuplicate(const MCCodeEmitter *Emitter,
     return BlocksToDuplicate;
   }
   // Do not append basic blocks after the last hot block in the current layout
-  auto NextBlock = BF.getBasicBlockAfter(Pred);
+  auto NextBlock = BF.getLayout().getBasicBlockAfter(Pred);
   if (NextBlock == nullptr || (!Pred->isCold() && NextBlock->isCold())) {
     return BlocksToDuplicate;
   }
@@ -576,11 +575,12 @@ void TailDuplication::runOnFunction(BinaryFunction &Function) {
     Emitter = Function.getBinaryContext().createIndependentMCCodeEmitter();
   }
 
-  Function.updateLayoutIndices();
+  Function.getLayout().updateLayoutIndices();
 
   // New blocks will be added and layout will change,
   // so make a copy here to iterate over the original layout
-  BinaryFunction::BasicBlockOrderType BlockLayout = Function.getLayout();
+  BinaryFunction::BasicBlockOrderType BlockLayout(
+      Function.getLayout().block_begin(), Function.getLayout().block_end());
   bool ModifiedFunction = false;
   for (BinaryBasicBlock *BB : BlockLayout) {
     AllDynamicCount += BB->getKnownExecutionCount();
@@ -607,7 +607,7 @@ void TailDuplication::runOnFunction(BinaryFunction &Function) {
     if (BlocksToDuplicate.empty())
       continue;
 
-    // Apply the the duplication
+    // Apply the duplication
     ModifiedFunction = true;
     DuplicationsDynamicCount += BB->getExecutionCount();
     auto DuplicatedBlocks = duplicateBlocks(*BB, BlocksToDuplicate);
@@ -627,15 +627,15 @@ void TailDuplication::runOnFunction(BinaryFunction &Function) {
     }
 
     // Layout indices might be stale after duplication
-    Function.updateLayoutIndices();
+    Function.getLayout().updateLayoutIndices();
   }
   if (ModifiedFunction)
     ModifiedFunctions++;
 }
 
-void TailDuplication::runOnFunctions(BinaryContext &BC) {
+Error TailDuplication::runOnFunctions(BinaryContext &BC) {
   if (opts::TailDuplicationMode == TailDuplication::TD_NONE)
-    return;
+    return Error::success();
 
   for (auto &It : BC.getBinaryFunctions()) {
     BinaryFunction &Function = It.second;
@@ -644,23 +644,26 @@ void TailDuplication::runOnFunctions(BinaryContext &BC) {
     runOnFunction(Function);
   }
 
-  outs() << "BOLT-INFO: tail duplication"
-         << format(" modified %zu (%.2f%%) functions;", ModifiedFunctions,
-                   100.0 * ModifiedFunctions / BC.getBinaryFunctions().size())
-         << format(" duplicated %zu blocks (%zu bytes) responsible for",
-                   DuplicatedBlockCount, DuplicatedByteCount)
-         << format(" %zu dynamic executions (%.2f%% of all block executions)",
-                   DuplicationsDynamicCount,
-                   100.0 * DuplicationsDynamicCount / AllDynamicCount)
-         << "\n";
+  BC.outs()
+      << "BOLT-INFO: tail duplication"
+      << format(" modified %zu (%.2f%%) functions;", ModifiedFunctions,
+                100.0 * ModifiedFunctions / BC.getBinaryFunctions().size())
+      << format(" duplicated %zu blocks (%zu bytes) responsible for",
+                DuplicatedBlockCount, DuplicatedByteCount)
+      << format(" %zu dynamic executions (%.2f%% of all block executions)",
+                DuplicationsDynamicCount,
+                100.0 * DuplicationsDynamicCount / AllDynamicCount)
+      << "\n";
 
   if (opts::TailDuplicationConstCopyPropagation) {
-    outs() << "BOLT-INFO: tail duplication "
-           << format("applied %zu static and %zu dynamic propagation deletions",
+    BC.outs() << "BOLT-INFO: tail duplication "
+              << format(
+                     "applied %zu static and %zu dynamic propagation deletions",
                      StaticInstructionDeletionCount,
                      DynamicInstructionDeletionCount)
-           << "\n";
+              << "\n";
   }
+  return Error::success();
 }
 
 } // end namespace bolt

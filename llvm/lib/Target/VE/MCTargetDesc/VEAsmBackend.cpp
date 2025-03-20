@@ -97,9 +97,9 @@ protected:
   const Target &TheTarget;
 
 public:
-  VEAsmBackend(const Target &T) : MCAsmBackend(support::little), TheTarget(T) {}
+  VEAsmBackend(const Target &T)
+      : MCAsmBackend(llvm::endianness::little), TheTarget(T) {}
 
-  unsigned getNumFixupKinds() const override { return VE::NumTargetFixupKinds; }
 
   const MCFixupKindInfo &getFixupKindInfo(MCFixupKind Kind) const override {
     const static MCFixupKindInfo Infos[VE::NumTargetFixupKinds] = {
@@ -125,13 +125,14 @@ public:
     if (Kind < FirstTargetFixupKind)
       return MCAsmBackend::getFixupKindInfo(Kind);
 
-    assert(unsigned(Kind - FirstTargetFixupKind) < getNumFixupKinds() &&
+    assert(unsigned(Kind - FirstTargetFixupKind) < VE::NumTargetFixupKinds &&
            "Invalid kind!");
     return Infos[Kind - FirstTargetFixupKind];
   }
 
   bool shouldForceRelocation(const MCAssembler &Asm, const MCFixup &Fixup,
-                             const MCValue &Target) override {
+                             const MCValue &Target,
+                             const MCSubtargetInfo *STI) override {
     switch ((VE::Fixups)Fixup.getKind()) {
     default:
       return false;
@@ -151,16 +152,6 @@ public:
     return false;
   }
 
-  /// fixupNeedsRelaxation - Target specific predicate for whether a given
-  /// fixup requires the associated instruction to be relaxed.
-  bool fixupNeedsRelaxation(const MCFixup &Fixup, uint64_t Value,
-                            const MCRelaxableFragment *DF,
-                            const MCAsmLayout &Layout) const override {
-    // Not implemented yet.  For example, if we have a branch with
-    // lager than SIMM32 immediate value, we want to relaxation such
-    // branch instructions.
-    return false;
-  }
   void relaxInstruction(MCInst &Inst,
                         const MCSubtargetInfo &STI) const override {
     // Aurora VE doesn't support relaxInstruction yet.
@@ -174,7 +165,7 @@ public:
 
     for (uint64_t i = 0; i < Count; i += 8)
       support::endian::write<uint64_t>(OS, 0x7900000000000000ULL,
-                                       support::little);
+                                       llvm::endianness::little);
 
     return true;
   }
@@ -207,7 +198,8 @@ public:
     // from the fixup value. The Value has been "split up" into the
     // appropriate bitfields above.
     for (unsigned i = 0; i != NumBytes; ++i) {
-      unsigned Idx = Endian == support::little ? i : (NumBytes - 1) - i;
+      unsigned Idx =
+          Endian == llvm::endianness::little ? i : (NumBytes - 1) - i;
       Data[Offset + Idx] |= static_cast<uint8_t>((Value >> (i * 8)) & 0xff);
     }
   }

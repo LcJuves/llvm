@@ -6,6 +6,9 @@
 ; RUN: cat %t/main.ll %t/e.ll > %t/e2.ll
 ; RUN: cat %t/main.ll %t/f.ll > %t/f2.ll
 ; RUN: cat %t/main.ll %t/g.ll > %t/g2.ll
+; RUN: cat %t/main.ll %t/h.ll > %t/h2.ll
+; RUN: cat %t/existedGV.ll %t/main.ll %t/h.ll > %t/h3.ll
+; RUN: cat %t/main.ll %t/i.ll > %t/i2.ll
 ; RUN: llc -mtriple=x86_64-pc-linux-gnu -o - < %t/a2.ll | FileCheck --check-prefix=CHECK-TLS-FS-40 %s
 ; RUN: llc -mtriple=x86_64-pc-linux-gnu -o - < %t/b2.ll | FileCheck --check-prefix=CHECK-TLS-FS-40 %s
 ; RUN: llc -mtriple=x86_64-pc-linux-gnu -o - < %t/c2.ll | FileCheck --check-prefix=CHECK-GLOBAL %s
@@ -13,8 +16,9 @@
 ; RUN: llc -mtriple=x86_64-pc-linux-gnu -o - < %t/e2.ll | FileCheck --check-prefix=CHECK-GS %s
 ; RUN: llc -mtriple=x86_64-pc-linux-gnu -o - < %t/f2.ll | FileCheck --check-prefix=CHECK-OFFSET %s
 ; RUN: llc -mtriple=x86_64-pc-linux-gnu -o - < %t/g2.ll | FileCheck --check-prefix=CHECK-NEGATIVE-OFFSET %s
-
-;--- main.ll
+; RUN: llc -mtriple=x86_64-pc-linux-gnu -o - < %t/h2.ll | FileCheck --check-prefix=CHECK-SYM %s
+; RUN: llc -mtriple=x86_64-pc-linux-gnu -o - < %t/h3.ll | FileCheck --check-prefix=CHECK-SYMGV %s
+; RUN: llc -mtriple=x86_64-pc-linux-gnu -o - < %t/i2.ll | FileCheck --check-prefix=CHECK-SYM2 %s
 
 ; CHECK-TLS-FS-40:       movq    %fs:40, %rax
 ; CHECK-TLS-FS-40:       movq    %fs:40, %rax
@@ -57,7 +61,40 @@
 ; CHECK-GLOBAL-NEXT:  .cfi_def_cfa_offset 32
 ; CHECK-GLOBAL-NEXT:  callq   __stack_chk_fail
 
+; CHECK-SYM:         movq    __woof@GOTPCREL(%rip), %rax
+; CHECK-SYM-NEXT:    movq    %fs:(%rax), %rcx
+; CHECK-SYM-NEXT:    movq    %rcx, 16(%rsp)
+; CHECK-SYM:         movq    %fs:(%rax), %rax
+; CHECK-SYM-NEXT:    cmpq    16(%rsp), %rax
+; CHECK-SYM-NEXT:    jne     .LBB0_2
+; CHECK-SYM:         .LBB0_2:
+; CHECK-SYM-NEXT:    .cfi_def_cfa_offset 32
+; CHECK-SYM-NEXT:    callq   __stack_chk_fail
+
+; CHECK-SYMGV:       movq    __woof(%rip), %rax
+; CHECK-SYMGV-NEXT:  movq    %rax, 16(%rsp)
+; CHECK-SYMGV:       cmpq    16(%rsp), %rax
+; CHECK-SYMGV-NEXT:  jne     .LBB0_2
+; CHECK-SYMGV:       .LBB0_2:
+; CHECK-SYMGV-NEXT:  .cfi_def_cfa_offset 32
+; CHECK-SYMGV-NEXT:  callq   __stack_chk_fail
+
+; CHECK-SYM2:         movq    %fs:__woof(%rip), %rax
+; CHECK-SYM2-NEXT:    movq    %rax, 16(%rsp)
+; CHECK-SYM2:         movq    %fs:__woof(%rip), %rax
+; CHECK-SYM2-NEXT:    cmpq    16(%rsp), %rax
+; CHECK-SYM2-NEXT:    jne     .LBB0_2
+; CHECK-SYM2:         .LBB0_2:
+; CHECK-SYM2-NEXT:    .cfi_def_cfa_offset 32
+; CHECK-SYM2-NEXT:    callq   __stack_chk_fai
+
 ; ModuleID = 't.c'
+;--- existedGV.ll
+
+@__woof = dso_local local_unnamed_addr global ptr null, align 8
+
+;--- main.ll
+
 @.str = private unnamed_addr constant [14 x i8] c"stackoverflow\00", align 1
 @a = dso_local local_unnamed_addr global ptr null, align 8
 
@@ -90,7 +127,8 @@ attributes #2 = { nounwind }
 !llvm.module.flags = !{!1}
 !1 = !{i32 2, !"stack-protector-guard", !"tls"}
 ;--- c.ll
-!llvm.module.flags = !{!1}
+!llvm.module.flags = !{!0,!1}
+!0 = !{i32 7, !"direct-access-external-data", i32 1}
 !1 = !{i32 2, !"stack-protector-guard", !"global"}
 ;--- d.ll
 !llvm.module.flags = !{!1}
@@ -104,3 +142,11 @@ attributes #2 = { nounwind }
 ;--- g.ll
 !llvm.module.flags = !{!1}
 !1 = !{i32 2, !"stack-protector-guard-offset", i32 -20}
+;--- h.ll
+!llvm.module.flags = !{!0,!1}
+!0 = !{i32 7, !"direct-access-external-data", i32 0}
+!1 = !{i32 2, !"stack-protector-guard-symbol", !"__woof"}
+;--- i.ll
+!llvm.module.flags = !{!0,!1}
+!0 = !{i32 7, !"direct-access-external-data", i32 1}
+!1 = !{i32 2, !"stack-protector-guard-symbol", !"__woof"}

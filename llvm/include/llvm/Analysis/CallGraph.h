@@ -46,7 +46,6 @@
 #define LLVM_ANALYSIS_CALLGRAPH_H
 
 #include "llvm/IR/InstrTypes.h"
-#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/Pass.h"
@@ -130,10 +129,6 @@ public:
     return CallsExternalNode.get();
   }
 
-  /// Old node has been deleted, and New is to be used in its place, update the
-  /// ExternalCallingNode.
-  void ReplaceExternalCallEdge(CallGraphNode *Old, CallGraphNode *New);
-
   //===---------------------------------------------------------------------
   // Functions to keep a call graph up to date with a function that has been
   // modified.
@@ -175,7 +170,7 @@ public:
   /// first field and it is not supposed to be `nullptr`.
   /// Reference edges, for example, are used for connecting broker function
   /// caller to the callback function for callback call sites.
-  using CallRecord = std::pair<Optional<WeakTrackingVH>, CallGraphNode *>;
+  using CallRecord = std::pair<std::optional<WeakTrackingVH>, CallGraphNode *>;
 
 public:
   using CalledFunctionsVector = std::vector<CallRecord>;
@@ -240,11 +235,9 @@ public:
 
   /// Adds a function to the list of functions called by this one.
   void addCalledFunction(CallBase *Call, CallGraphNode *M) {
-    assert(!Call || !Call->getCalledFunction() ||
-           !Call->getCalledFunction()->isIntrinsic() ||
-           !Intrinsic::isLeaf(Call->getCalledFunction()->getIntrinsicID()));
-    CalledFunctions.emplace_back(
-        Call ? Optional<WeakTrackingVH>(Call) : Optional<WeakTrackingVH>(), M);
+    CalledFunctions.emplace_back(Call ? std::optional<WeakTrackingVH>(Call)
+                                      : std::optional<WeakTrackingVH>(),
+                                 M);
     M->AddRef();
   }
 
@@ -253,18 +246,6 @@ public:
     *I = CalledFunctions.back();
     CalledFunctions.pop_back();
   }
-
-  /// Removes the edge in the node for the specified call site.
-  ///
-  /// Note that this method takes linear time, so it should be used sparingly.
-  void removeCallEdgeFor(CallBase &Call);
-
-  /// Removes all call edges from this node to the specified callee
-  /// function.
-  ///
-  /// This takes more time to execute than removeCallEdgeTo, so it should not
-  /// be used unless necessary.
-  void removeAnyCallEdgeTo(CallGraphNode *Callee);
 
   /// Removes one edge associated with a null callsite from this node to
   /// the specified callee function.
@@ -324,6 +305,21 @@ public:
   explicit CallGraphPrinterPass(raw_ostream &OS) : OS(OS) {}
 
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
+
+  static bool isRequired() { return true; }
+};
+
+/// Printer pass for the summarized \c CallGraphAnalysis results.
+class CallGraphSCCsPrinterPass
+    : public PassInfoMixin<CallGraphSCCsPrinterPass> {
+  raw_ostream &OS;
+
+public:
+  explicit CallGraphSCCsPrinterPass(raw_ostream &OS) : OS(OS) {}
+
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
+
+  static bool isRequired() { return true; }
 };
 
 /// The \c ModulePass which wraps up a \c CallGraph and the logic to

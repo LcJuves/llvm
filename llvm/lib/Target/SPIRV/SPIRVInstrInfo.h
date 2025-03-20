@@ -30,8 +30,14 @@ public:
   const SPIRVRegisterInfo &getRegisterInfo() const { return RI; }
   bool isHeaderInstr(const MachineInstr &MI) const;
   bool isConstantInstr(const MachineInstr &MI) const;
+  bool isSpecConstantInstr(const MachineInstr &MI) const;
+  bool isInlineAsmDefInstr(const MachineInstr &MI) const;
   bool isTypeDeclInstr(const MachineInstr &MI) const;
   bool isDecorationInstr(const MachineInstr &MI) const;
+  bool isAliasingInstr(const MachineInstr &MI) const;
+  bool canUseFastMathFlags(const MachineInstr &MI) const;
+  bool canUseNSW(const MachineInstr &MI) const;
+  bool canUseNUW(const MachineInstr &MI) const;
 
   bool analyzeBranch(MachineBasicBlock &MBB, MachineBasicBlock *&TBB,
                      MachineBasicBlock *&FBB,
@@ -46,9 +52,19 @@ public:
                         const DebugLoc &DL,
                         int *BytesAdded = nullptr) const override;
   void copyPhysReg(MachineBasicBlock &MBB, MachineBasicBlock::iterator I,
-                   const DebugLoc &DL, MCRegister DestReg, MCRegister SrcReg,
-                   bool KillSrc) const override;
+                   const DebugLoc &DL, Register DestReg, Register SrcReg,
+                   bool KillSrc, bool RenamableDest = false,
+                   bool RenamableSrc = false) const override;
+  bool expandPostRAPseudo(MachineInstr &MI) const override;
 };
+
+namespace SPIRV {
+enum AsmComments {
+  // It is a half type
+  ASM_PRINTER_WIDTH16 = MachineInstr::TAsmComments
+};
+} // namespace SPIRV
+
 } // namespace llvm
 
 #endif // LLVM_LIB_TARGET_SPIRV_SPIRVINSTRINFO_H

@@ -29,73 +29,82 @@ static llvm::cl::opt<bool>
 namespace llvm {
 namespace bolt {
 
-void VeneerElimination::runOnFunctions(BinaryContext &BC) {
+static bool isPossibleVeneer(const BinaryFunction &BF) {
+  return BF.isAArch64Veneer() || BF.getOneName().starts_with("__AArch64");
+}
+
+Error VeneerElimination::runOnFunctions(BinaryContext &BC) {
   if (!opts::EliminateVeneers || !BC.isAArch64())
-    return;
+    return Error::success();
 
-  auto &BFs = BC.getBinaryFunctions();
   std::unordered_map<const MCSymbol *, const MCSymbol *> VeneerDestinations;
-  uint64_t VeneersCount = 0;
-  for (auto It = BFs.begin(); It != BFs.end();) {
-    auto CurrentIt = It;
-    ++It;
+  uint64_t NumEliminatedVeneers = 0;
+  for (BinaryFunction &BF : llvm::make_second_range(BC.getBinaryFunctions())) {
+    if (!isPossibleVeneer(BF))
+      continue;
 
-    if (CurrentIt->second.isAArch64Veneer()) {
-      VeneersCount++;
-      BinaryFunction &VeneerFunction = CurrentIt->second;
+    if (BF.isIgnored())
+      continue;
 
-      MCInst &FirstInstruction = *(VeneerFunction.begin()->begin());
-      const MCSymbol *VeneerTargetSymbol =
-          BC.MIB->getTargetSymbol(FirstInstruction, 1);
-
-      // Functions can have multiple symbols
-      for (StringRef Name : VeneerFunction.getNames()) {
-        MCSymbol *Symbol = BC.Ctx->lookupSymbol(Name);
-        VeneerDestinations[Symbol] = VeneerTargetSymbol;
-        BC.SymbolToFunctionMap.erase(Symbol);
-      }
-
-      BC.BinaryDataMap.erase(VeneerFunction.getAddress());
-      BFs.erase(CurrentIt);
+    MCInst &FirstInstruction = *(BF.begin()->begin());
+    const MCSymbol *VeneerTargetSymbol = 0;
+    uint64_t TargetAddress;
+    if (BC.MIB->isTailCall(FirstInstruction)) {
+      VeneerTargetSymbol = BC.MIB->getTargetSymbol(FirstInstruction);
+    } else if (BC.MIB->matchAbsLongVeneer(BF, TargetAddress)) {
+      if (BinaryFunction *TargetBF =
+              BC.getBinaryFunctionAtAddress(TargetAddress))
+        VeneerTargetSymbol = TargetBF->getSymbol();
+    } else if (BC.MIB->hasAnnotation(FirstInstruction, "AArch64Veneer")) {
+      VeneerTargetSymbol = BC.MIB->getTargetSymbol(FirstInstruction, 1);
     }
+
+    if (!VeneerTargetSymbol)
+      continue;
+
+    for (const MCSymbol *Symbol : BF.getSymbols())
+      VeneerDestinations[Symbol] = VeneerTargetSymbol;
+
+    NumEliminatedVeneers++;
+    BF.setPseudo(true);
   }
 
-  LLVM_DEBUG(dbgs() << "BOLT-INFO: number of removed linker-inserted veneers :"
-                    << VeneersCount << "\n");
+  BC.outs() << "BOLT-INFO: number of removed linker-inserted veneers: "
+            << NumEliminatedVeneers << '\n';
 
   // Handle veneers to veneers in case they occur
-  for (auto entry : VeneerDestinations) {
-    const MCSymbol *src = entry.first;
-    const MCSymbol *dest = entry.second;
-    while (VeneerDestinations.find(dest) != VeneerDestinations.end()) {
-      dest = VeneerDestinations[dest];
-    }
-    VeneerDestinations[src] = dest;
+  for (auto &Entry : VeneerDestinations) {
+    const MCSymbol *Src = Entry.first;
+    const MCSymbol *Dest = Entry.second;
+    while (VeneerDestinations.find(Dest) != VeneerDestinations.end())
+      Dest = VeneerDestinations[Dest];
+
+    VeneerDestinations[Src] = Dest;
   }
 
   uint64_t VeneerCallers = 0;
-  for (auto &It : BFs) {
-    BinaryFunction &Function = It.second;
-    for (BinaryBasicBlock &BB : Function) {
+  for (BinaryFunction &BF : llvm::make_second_range(BC.getBinaryFunctions())) {
+    for (BinaryBasicBlock &BB : BF) {
       for (MCInst &Instr : BB) {
         if (!BC.MIB->isCall(Instr) || BC.MIB->isIndirectCall(Instr))
           continue;
 
         const MCSymbol *TargetSymbol = BC.MIB->getTargetSymbol(Instr, 0);
-        if (VeneerDestinations.find(TargetSymbol) == VeneerDestinations.end())
+        auto It = VeneerDestinations.find(TargetSymbol);
+        if (It == VeneerDestinations.end())
           continue;
 
         VeneerCallers++;
-        if (!BC.MIB->replaceBranchTarget(
-                Instr, VeneerDestinations[TargetSymbol], BC.Ctx.get()))
-          assert(false && "updating veneer call destination failed");
+        BC.MIB->replaceBranchTarget(Instr, It->second, BC.Ctx.get());
       }
     }
   }
 
   LLVM_DEBUG(
-      dbgs() << "BOLT-INFO: number of linker-inserted veneers call sites :"
+      dbgs() << "BOLT-INFO: number of linker-inserted veneers call sites: "
              << VeneerCallers << "\n");
+  (void)VeneerCallers;
+  return Error::success();
 }
 
 } // namespace bolt

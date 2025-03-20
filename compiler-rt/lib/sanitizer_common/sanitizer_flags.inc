@@ -68,9 +68,12 @@ COMMON_FLAG(
 COMMON_FLAG(
     int, verbosity, 0,
     "Verbosity level (0 - silent, 1 - a bit of output, 2+ - more output).")
-COMMON_FLAG(bool, strip_env, 1,
+COMMON_FLAG(bool, strip_env, true,
             "Whether to remove the sanitizer from DYLD_INSERT_LIBRARIES to "
-            "avoid passing it to children. Default is true.")
+            "avoid passing it to children on Apple platforms. Default is true.")
+COMMON_FLAG(bool, verify_interceptors, true,
+            "Verify that interceptors are working on Apple platforms. Default "
+            "is true.")
 COMMON_FLAG(bool, detect_leaks, !SANITIZER_APPLE, "Enable memory leak detection.")
 COMMON_FLAG(
     bool, leak_check_at_exit, true,
@@ -266,3 +269,16 @@ COMMON_FLAG(bool, detect_write_exec, false,
 COMMON_FLAG(bool, test_only_emulate_no_memorymap, false,
             "TEST ONLY fail to read memory mappings to emulate sanitized "
             "\"init\"")
+// With static linking, dladdr((void*)pthread_join) or similar will return the
+// path to the main program. This flag will replace dlopen(<main program,...>
+// with dlopen(NULL,...), which is the correct way to get a handle to the main
+// program.
+COMMON_FLAG(bool, test_only_replace_dlopen_main_program, false,
+            "TEST ONLY replace dlopen(<main program>,...) with dlopen(NULL)")
+
+COMMON_FLAG(bool, enable_symbolizer_markup, SANITIZER_FUCHSIA,
+            "Use sanitizer symbolizer markup, available on Linux "
+            "and always set true for Fuchsia.")
+
+COMMON_FLAG(bool, detect_invalid_join, true,
+            "If set, check invalid joins of threads.")

@@ -202,14 +202,16 @@ define void @test3_minsize(ptr nocapture %A, ptr nocapture %B) nounwind minsize 
 ; DARWIN-LABEL: test3_minsize:
 ; DARWIN:       ## %bb.0:
 ; DARWIN-NEXT:    pushq $64
-; DARWIN-NEXT:    popq %rdx
-; DARWIN-NEXT:    jmp _memcpy ## TAILCALL
+; DARWIN-NEXT:    popq %rcx
+; DARWIN-NEXT:    rep;movsb (%rsi), %es:(%rdi)
+; DARWIN-NEXT:    retq
 ;
 ; LINUX-LABEL: test3_minsize:
 ; LINUX:       # %bb.0:
 ; LINUX-NEXT:    pushq $64
-; LINUX-NEXT:    popq %rdx
-; LINUX-NEXT:    jmp memcpy@PLT # TAILCALL
+; LINUX-NEXT:    popq %rcx
+; LINUX-NEXT:    rep;movsb (%rsi), %es:(%rdi)
+; LINUX-NEXT:    retq
 ;
 ; LINUX-SKL-LABEL: test3_minsize:
 ; LINUX-SKL:       # %bb.0:
@@ -249,14 +251,16 @@ define void @test3_minsize_optsize(ptr nocapture %A, ptr nocapture %B) nounwind 
 ; DARWIN-LABEL: test3_minsize_optsize:
 ; DARWIN:       ## %bb.0:
 ; DARWIN-NEXT:    pushq $64
-; DARWIN-NEXT:    popq %rdx
-; DARWIN-NEXT:    jmp _memcpy ## TAILCALL
+; DARWIN-NEXT:    popq %rcx
+; DARWIN-NEXT:    rep;movsb (%rsi), %es:(%rdi)
+; DARWIN-NEXT:    retq
 ;
 ; LINUX-LABEL: test3_minsize_optsize:
 ; LINUX:       # %bb.0:
 ; LINUX-NEXT:    pushq $64
-; LINUX-NEXT:    popq %rdx
-; LINUX-NEXT:    jmp memcpy@PLT # TAILCALL
+; LINUX-NEXT:    popq %rcx
+; LINUX-NEXT:    rep;movsb (%rsi), %es:(%rdi)
+; LINUX-NEXT:    retq
 ;
 ; LINUX-SKL-LABEL: test3_minsize_optsize:
 ; LINUX-SKL:       # %bb.0:
@@ -467,7 +471,7 @@ define void @PR15348(ptr %a, ptr %b) {
 ; unaligned loads and stores.
 ; DARWIN-LABEL: PR15348:
 ; DARWIN:       ## %bb.0:
-; DARWIN-NEXT:    movb 16(%rsi), %al
+; DARWIN-NEXT:    movzbl 16(%rsi), %eax
 ; DARWIN-NEXT:    movb %al, 16(%rdi)
 ; DARWIN-NEXT:    movq (%rsi), %rax
 ; DARWIN-NEXT:    movq 8(%rsi), %rcx
@@ -477,7 +481,7 @@ define void @PR15348(ptr %a, ptr %b) {
 ;
 ; LINUX-LABEL: PR15348:
 ; LINUX:       # %bb.0:
-; LINUX-NEXT:    movb 16(%rsi), %al
+; LINUX-NEXT:    movzbl 16(%rsi), %eax
 ; LINUX-NEXT:    movb %al, 16(%rdi)
 ; LINUX-NEXT:    movq (%rsi), %rax
 ; LINUX-NEXT:    movq 8(%rsi), %rcx
@@ -487,7 +491,7 @@ define void @PR15348(ptr %a, ptr %b) {
 ;
 ; LINUX-SKL-LABEL: PR15348:
 ; LINUX-SKL:       # %bb.0:
-; LINUX-SKL-NEXT:    movb 16(%rsi), %al
+; LINUX-SKL-NEXT:    movzbl 16(%rsi), %eax
 ; LINUX-SKL-NEXT:    movb %al, 16(%rdi)
 ; LINUX-SKL-NEXT:    vmovups (%rsi), %xmm0
 ; LINUX-SKL-NEXT:    vmovups %xmm0, (%rdi)
@@ -495,7 +499,7 @@ define void @PR15348(ptr %a, ptr %b) {
 ;
 ; LINUX-SKX-LABEL: PR15348:
 ; LINUX-SKX:       # %bb.0:
-; LINUX-SKX-NEXT:    movb 16(%rsi), %al
+; LINUX-SKX-NEXT:    movzbl 16(%rsi), %eax
 ; LINUX-SKX-NEXT:    movb %al, 16(%rdi)
 ; LINUX-SKX-NEXT:    vmovups (%rsi), %xmm0
 ; LINUX-SKX-NEXT:    vmovups %xmm0, (%rdi)
@@ -503,7 +507,7 @@ define void @PR15348(ptr %a, ptr %b) {
 ;
 ; LINUX-KNL-LABEL: PR15348:
 ; LINUX-KNL:       # %bb.0:
-; LINUX-KNL-NEXT:    movb 16(%rsi), %al
+; LINUX-KNL-NEXT:    movzbl 16(%rsi), %eax
 ; LINUX-KNL-NEXT:    movb %al, 16(%rdi)
 ; LINUX-KNL-NEXT:    vmovups (%rsi), %xmm0
 ; LINUX-KNL-NEXT:    vmovups %xmm0, (%rdi)
@@ -511,7 +515,7 @@ define void @PR15348(ptr %a, ptr %b) {
 ;
 ; LINUX-AVX512BW-LABEL: PR15348:
 ; LINUX-AVX512BW:       # %bb.0:
-; LINUX-AVX512BW-NEXT:    movb 16(%rsi), %al
+; LINUX-AVX512BW-NEXT:    movzbl 16(%rsi), %eax
 ; LINUX-AVX512BW-NEXT:    movb %al, 16(%rdi)
 ; LINUX-AVX512BW-NEXT:    vmovups (%rsi), %xmm0
 ; LINUX-AVX512BW-NEXT:    vmovups %xmm0, (%rdi)

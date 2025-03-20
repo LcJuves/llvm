@@ -43,12 +43,14 @@ class PCHContainerReader;
 class Preprocessor;
 class PreprocessorOptions;
 class PreprocessorOutputOptions;
+class CodeGenOptions;
 
 /// InitializePreprocessor - Initialize the preprocessor getting it and the
 /// environment ready to process a single file.
 void InitializePreprocessor(Preprocessor &PP, const PreprocessorOptions &PPOpts,
                             const PCHContainerReader &PCHContainerRdr,
-                            const FrontendOptions &FEOpts);
+                            const FrontendOptions &FEOpts,
+                            const CodeGenOptions &CodeGenOpts);
 
 /// DoPrintPreprocessedInput - Implement -E mode.
 void DoPrintPreprocessedInput(Preprocessor &PP, raw_ostream *OS,
@@ -107,10 +109,10 @@ public:
 
   void finishedMainFile(DiagnosticsEngine &Diags) override;
 
-  bool needSystemDependencies() final override { return IncludeSystemHeaders; }
+  bool needSystemDependencies() final { return IncludeSystemHeaders; }
 
   bool sawDependency(StringRef Filename, bool FromModule, bool IsSystem,
-                     bool IsModuleFile, bool IsMissing) final override;
+                     bool IsModuleFile, bool IsMissing) final;
 
 protected:
   void outputDependencyFile(llvm::raw_ostream &OS);

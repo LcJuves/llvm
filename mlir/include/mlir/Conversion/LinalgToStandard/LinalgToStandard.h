@@ -10,12 +10,16 @@
 #define MLIR_CONVERSION_LINALGTOSTANDARD_LINALGTOSTANDARD_H_
 
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 
 namespace mlir {
 class ModuleOp;
 template <typename T>
 class OperationPass;
+
+#define GEN_PASS_DECL_CONVERTLINALGTOSTANDARDPASS
+#include "mlir/Conversion/Passes.h.inc"
 
 namespace linalg {
 
@@ -43,10 +47,6 @@ public:
 void populateLinalgToStandardConversionPatterns(RewritePatternSet &patterns);
 
 } // namespace linalg
-
-/// Create a pass to convert Linalg operations to the Standard dialect.
-std::unique_ptr<OperationPass<ModuleOp>> createConvertLinalgToStandardPass();
-
 } // namespace mlir
 
 #endif // MLIR_CONVERSION_LINALGTOSTANDARD_LINALGTOSTANDARD_H_

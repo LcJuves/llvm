@@ -15,7 +15,7 @@
 define i8 @xor_sminval_i8(i8 %x) {
 ; X86-LABEL: xor_sminval_i8:
 ; X86:       # %bb.0:
-; X86-NEXT:    movb {{[0-9]+}}(%esp), %al
+; X86-NEXT:    movzbl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    addb $-128, %al
 ; X86-NEXT:    retl
 ;
@@ -33,7 +33,7 @@ define i8 @xor_sminval_i8(i8 %x) {
 define i8 @xor_notsminval_i8(i8 %x) {
 ; X86-LABEL: xor_notsminval_i8:
 ; X86:       # %bb.0:
-; X86-NEXT:    movb {{[0-9]+}}(%esp), %al
+; X86-NEXT:    movzbl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    xorb $127, %al
 ; X86-NEXT:    retl
 ;
@@ -122,7 +122,7 @@ define i64 @xor_sminval_i64(i64 %x) {
 define i8 @xor_add_sminval_i8(i8 %x, i8 %y) {
 ; X86-LABEL: xor_add_sminval_i8:
 ; X86:       # %bb.0:
-; X86-NEXT:    movb {{[0-9]+}}(%esp), %al
+; X86-NEXT:    movzbl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    addb {{[0-9]+}}(%esp), %al
 ; X86-NEXT:    addb $-128, %al
 ; X86-NEXT:    retl
@@ -204,7 +204,7 @@ define i64 @xor_add_sminval_i64(i64 %x, i64 %y) {
 define i8 @sub_xor_sminval_i8(i8 %x, i8 %y) {
 ; X86-LABEL: sub_xor_sminval_i8:
 ; X86:       # %bb.0:
-; X86-NEXT:    movb {{[0-9]+}}(%esp), %al
+; X86-NEXT:    movzbl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    addb $-128, %al
 ; X86-NEXT:    subb {{[0-9]+}}(%esp), %al
 ; X86-NEXT:    retl
@@ -285,7 +285,7 @@ define i64 @add_xor_sminval_i64(i64 %x, i64 %y) {
 define i8 @xor_shl_sminval_i8(i8 %x) {
 ; X86-LABEL: xor_shl_sminval_i8:
 ; X86:       # %bb.0:
-; X86-NEXT:    movb {{[0-9]+}}(%esp), %al
+; X86-NEXT:    movzbl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    addb %al, %al
 ; X86-NEXT:    addb $-128, %al
 ; X86-NEXT:    retl
@@ -327,7 +327,8 @@ define i32 @xor_shl_sminval_i32(i32 %x) {
 ; X86-LABEL: xor_shl_sminval_i32:
 ; X86:       # %bb.0:
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
-; X86-NEXT:    leal -2147483648(,%eax,8), %eax
+; X86-NEXT:    movl $-2147483648, %ecx # imm = 0x80000000
+; X86-NEXT:    leal (%ecx,%eax,8), %eax
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: xor_shl_sminval_i32:

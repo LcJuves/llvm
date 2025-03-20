@@ -12,6 +12,7 @@
 ///
 //===----------------------------------------------------------------------===//
 
+#include "SIOptimizeExecMaskingPreRA.h"
 #include "AMDGPU.h"
 #include "GCNSubtarget.h"
 #include "MCTargetDesc/AMDGPUMCTargetDesc.h"
@@ -25,7 +26,7 @@ using namespace llvm;
 
 namespace {
 
-class SIOptimizeExecMaskingPreRA : public MachineFunctionPass {
+class SIOptimizeExecMaskingPreRA {
 private:
   const SIRegisterInfo *TRI;
   const SIInstrInfo *TII;
@@ -43,10 +44,17 @@ private:
   bool optimizeElseBranch(MachineBasicBlock &MBB);
 
 public:
+  SIOptimizeExecMaskingPreRA(LiveIntervals *LIS) : LIS(LIS) {}
+  bool run(MachineFunction &MF);
+};
+
+class SIOptimizeExecMaskingPreRALegacy : public MachineFunctionPass {
+public:
   static char ID;
 
-  SIOptimizeExecMaskingPreRA() : MachineFunctionPass(ID) {
-    initializeSIOptimizeExecMaskingPreRAPass(*PassRegistry::getPassRegistry());
+  SIOptimizeExecMaskingPreRALegacy() : MachineFunctionPass(ID) {
+    initializeSIOptimizeExecMaskingPreRALegacyPass(
+        *PassRegistry::getPassRegistry());
   }
 
   bool runOnMachineFunction(MachineFunction &MF) override;
@@ -56,7 +64,7 @@ public:
   }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override {
-    AU.addRequired<LiveIntervals>();
+    AU.addRequired<LiveIntervalsWrapperPass>();
     AU.setPreservesAll();
     MachineFunctionPass::getAnalysisUsage(AU);
   }
@@ -64,18 +72,18 @@ public:
 
 } // End anonymous namespace.
 
-INITIALIZE_PASS_BEGIN(SIOptimizeExecMaskingPreRA, DEBUG_TYPE,
+INITIALIZE_PASS_BEGIN(SIOptimizeExecMaskingPreRALegacy, DEBUG_TYPE,
                       "SI optimize exec mask operations pre-RA", false, false)
-INITIALIZE_PASS_DEPENDENCY(LiveIntervals)
-INITIALIZE_PASS_END(SIOptimizeExecMaskingPreRA, DEBUG_TYPE,
+INITIALIZE_PASS_DEPENDENCY(LiveIntervalsWrapperPass)
+INITIALIZE_PASS_END(SIOptimizeExecMaskingPreRALegacy, DEBUG_TYPE,
                     "SI optimize exec mask operations pre-RA", false, false)
 
-char SIOptimizeExecMaskingPreRA::ID = 0;
+char SIOptimizeExecMaskingPreRALegacy::ID = 0;
 
-char &llvm::SIOptimizeExecMaskingPreRAID = SIOptimizeExecMaskingPreRA::ID;
+char &llvm::SIOptimizeExecMaskingPreRAID = SIOptimizeExecMaskingPreRALegacy::ID;
 
 FunctionPass *llvm::createSIOptimizeExecMaskingPreRAPass() {
-  return new SIOptimizeExecMaskingPreRA();
+  return new SIOptimizeExecMaskingPreRALegacy();
 }
 
 // See if there is a def between \p AndIdx and \p SelIdx that needs to live
@@ -96,8 +104,8 @@ static bool isDefBetween(const SIRegisterInfo &TRI,
   if (Reg.isVirtual())
     return isDefBetween(LIS->getInterval(Reg), AndIdx, SelIdx);
 
-  for (MCRegUnitIterator UI(Reg.asMCReg(), &TRI); UI.isValid(); ++UI) {
-    if (isDefBetween(LIS->getRegUnit(*UI), AndIdx, SelIdx))
+  for (MCRegUnit Unit : TRI.regunits(Reg.asMCReg())) {
+    if (isDefBetween(LIS->getRegUnit(Unit), AndIdx, SelIdx))
       return true;
   }
 
@@ -106,7 +114,7 @@ static bool isDefBetween(const SIRegisterInfo &TRI,
 
 // Optimize sequence
 //    %sel = V_CNDMASK_B32_e64 0, 1, %cc
-//    %cmp = V_CMP_NE_U32 1, %1
+//    %cmp = V_CMP_NE_U32 1, %sel
 //    $vcc = S_AND_B64 $exec, %cmp
 //    S_CBRANCH_VCC[N]Z
 // =>
@@ -159,6 +167,9 @@ bool SIOptimizeExecMaskingPreRA::optimizeVcndVcmpPair(MachineBasicBlock &MBB) {
     return false;
 
   Register SelReg = Op1->getReg();
+  if (SelReg.isPhysical())
+    return false;
+
   auto *Sel = TRI->findReachingDef(SelReg, Op1->getSubReg(), *Cmp, *MRI, LIS);
   if (!Sel || Sel->getOpcode() != AMDGPU::V_CNDMASK_B32_e64)
     return false;
@@ -181,6 +192,16 @@ bool SIOptimizeExecMaskingPreRA::optimizeVcndVcmpPair(MachineBasicBlock &MBB) {
   if (isDefBetween(*TRI, LIS, CCReg, *Sel, *And))
     return false;
 
+  // Cannot safely mirror live intervals with PHI nodes, so check for these
+  // before optimization.
+  SlotIndex SelIdx = LIS->getInstructionIndex(*Sel);
+  LiveInterval *SelLI = &LIS->getInterval(SelReg);
+  if (llvm::any_of(SelLI->vnis(),
+                    [](const VNInfo *VNI) {
+                      return VNI->isPHIDef();
+                    }))
+    return false;
+
   // TODO: Guard against implicit def operands?
   LLVM_DEBUG(dbgs() << "Folding sequence:\n\t" << *Sel << '\t' << *Cmp << '\t'
                     << *And);
@@ -201,56 +222,23 @@ bool SIOptimizeExecMaskingPreRA::optimizeVcndVcmpPair(MachineBasicBlock &MBB) {
 
   LLVM_DEBUG(dbgs() << "=>\n\t" << *Andn2 << '\n');
 
-  SlotIndex CmpIdx = LIS->getInstructionIndex(*Cmp);
-  SlotIndex SelIdx = LIS->getInstructionIndex(*Sel);
-
-  LiveInterval *CmpLI =
-      CmpReg.isVirtual() ? &LIS->getInterval(CmpReg) : nullptr;
-  LiveInterval *SelLI =
-      SelReg.isVirtual() ? &LIS->getInterval(SelReg) : nullptr;
-
   // Update live intervals for CCReg before potentially removing CmpReg/SelReg,
   // and their associated liveness information.
+  SlotIndex CmpIdx = LIS->getInstructionIndex(*Cmp);
   if (CCReg.isVirtual()) {
-    // Note: this ignores that SelLI might have multiple internal values
-    // or splits and simply extends the live range to cover all cases
-    // where the result of the v_cndmask_b32 was live (e.g. loops).
-    // This could yield worse register allocation in rare edge cases.
-    SlotIndex EndIdx = AndIdx.getRegSlot();
-    if (SelLI && SelLI->endIndex() > EndIdx && SelLI->endIndex().isBlock())
-      EndIdx = SelLI->endIndex();
-
     LiveInterval &CCLI = LIS->getInterval(CCReg);
     auto CCQ = CCLI.Query(SelIdx.getRegSlot());
     if (CCQ.valueIn()) {
-      CCLI.addSegment(LiveRange::Segment(SelIdx.getRegSlot(),
-                                         EndIdx, CCQ.valueIn()));
-    }
-
-    if (CC->getSubReg()) {
-      LaneBitmask Mask = TRI->getSubRegIndexLaneMask(CC->getSubReg());
-      BumpPtrAllocator &Allocator = LIS->getVNInfoAllocator();
-      CCLI.refineSubRanges(
-          Allocator, Mask,
-          [=](LiveInterval::SubRange &SR) {
-            auto CCQS = SR.Query(SelIdx.getRegSlot());
-            if (CCQS.valueIn()) {
-              SR.addSegment(LiveRange::Segment(
-                  SelIdx.getRegSlot(), EndIdx, CCQS.valueIn()));
-            }
-          },
-          *LIS->getSlotIndexes(), *TRI);
-      CCLI.removeEmptySubRanges();
-
-      SmallVector<LiveInterval *> SplitLIs;
-      LIS->splitSeparateComponents(CCLI, SplitLIs);
+      LIS->removeInterval(CCReg);
+      LIS->createAndComputeVirtRegInterval(CCReg);
     }
   } else
     LIS->removeAllRegUnitsForPhysReg(CCReg);
 
   // Try to remove compare. Cmp value should not used in between of cmp
   // and s_and_b64 if VCC or just unused if any other register.
-  if ((CmpReg.isVirtual() && CmpLI && CmpLI->Query(AndIdx.getRegSlot()).isKill()) ||
+  LiveInterval *CmpLI = CmpReg.isVirtual() ? &LIS->getInterval(CmpReg) : nullptr;
+  if ((CmpLI && CmpLI->Query(AndIdx.getRegSlot()).isKill()) ||
       (CmpReg == Register(CondReg) &&
        std::none_of(std::next(Cmp->getIterator()), Andn2->getIterator(),
                     [&](const MachineInstr &MI) {
@@ -263,19 +251,21 @@ bool SIOptimizeExecMaskingPreRA::optimizeVcndVcmpPair(MachineBasicBlock &MBB) {
     Cmp->eraseFromParent();
 
     // Try to remove v_cndmask_b32.
-    if (SelLI) {
-      bool CanRemoveSel = SelLI->Query(CmpIdx.getRegSlot()).isKill();
-      if (!CanRemoveSel) {
-        // Try to shrink the live interval and check for dead def instead.
-        LIS->shrinkToUses(SelLI, nullptr);
-        CanRemoveSel = SelLI->Query(SelIdx.getRegSlot()).isDeadDef();
-      }
-      if (CanRemoveSel) {
-        LLVM_DEBUG(dbgs() << "Erasing: " << *Sel << '\n');
+    // Kill status must be checked before shrinking the live range.
+    bool IsKill = SelLI->Query(CmpIdx.getRegSlot()).isKill();
+    LIS->shrinkToUses(SelLI);
+    bool IsDead = SelLI->Query(SelIdx.getRegSlot()).isDeadDef();
+    if (MRI->use_nodbg_empty(SelReg) && (IsKill || IsDead)) {
+      LLVM_DEBUG(dbgs() << "Erasing: " << *Sel << '\n');
 
-        LIS->removeVRegDefAt(*SelLI, SelIdx.getRegSlot());
-        LIS->RemoveMachineInstrFromMaps(*Sel);
-        Sel->eraseFromParent();
+      LIS->removeVRegDefAt(*SelLI, SelIdx.getRegSlot());
+      LIS->RemoveMachineInstrFromMaps(*Sel);
+      bool ShrinkSel = Sel->getOperand(0).readsReg();
+      Sel->eraseFromParent();
+      if (ShrinkSel) {
+        // The result of the V_CNDMASK was a subreg def which counted as a read
+        // from the other parts of the reg. Shrink their live ranges.
+        LIS->shrinkToUses(SelLI);
       }
     }
   }
@@ -338,8 +328,8 @@ bool SIOptimizeExecMaskingPreRA::optimizeElseBranch(MachineBasicBlock &MBB) {
   // Instead just check that the def segments are adjacent.
   SlotIndex StartIdx = LIS->getInstructionIndex(SaveExecMI);
   SlotIndex EndIdx = LIS->getInstructionIndex(*AndExecMI);
-  for (MCRegUnitIterator UI(ExecReg, TRI); UI.isValid(); ++UI) {
-    LiveRange &RegUnit = LIS->getRegUnit(*UI);
+  for (MCRegUnit Unit : TRI->regunits(ExecReg)) {
+    LiveRange &RegUnit = LIS->getRegUnit(Unit);
     if (RegUnit.find(StartIdx) != std::prev(RegUnit.find(EndIdx)))
       return false;
   }
@@ -358,15 +348,28 @@ bool SIOptimizeExecMaskingPreRA::optimizeElseBranch(MachineBasicBlock &MBB) {
   return true;
 }
 
-bool SIOptimizeExecMaskingPreRA::runOnMachineFunction(MachineFunction &MF) {
+PreservedAnalyses
+SIOptimizeExecMaskingPreRAPass::run(MachineFunction &MF,
+                                    MachineFunctionAnalysisManager &MFAM) {
+  auto &LIS = MFAM.getResult<LiveIntervalsAnalysis>(MF);
+  SIOptimizeExecMaskingPreRA(&LIS).run(MF);
+  return PreservedAnalyses::all();
+}
+
+bool SIOptimizeExecMaskingPreRALegacy::runOnMachineFunction(
+    MachineFunction &MF) {
   if (skipFunction(MF.getFunction()))
     return false;
 
+  auto *LIS = &getAnalysis<LiveIntervalsWrapperPass>().getLIS();
+  return SIOptimizeExecMaskingPreRA(LIS).run(MF);
+}
+
+bool SIOptimizeExecMaskingPreRA::run(MachineFunction &MF) {
   const GCNSubtarget &ST = MF.getSubtarget<GCNSubtarget>();
   TRI = ST.getRegisterInfo();
   TII = ST.getInstrInfo();
   MRI = &MF.getRegInfo();
-  LIS = &getAnalysis<LiveIntervals>();
 
   const bool Wave32 = ST.isWave32();
   AndOpc = Wave32 ? AMDGPU::S_AND_B32 : AMDGPU::S_AND_B64;
@@ -410,7 +413,7 @@ bool SIOptimizeExecMaskingPreRA::runOnMachineFunction(MachineFunction &MF) {
       SmallVector<MachineBasicBlock*, 4> Blocks({&MBB});
 
       while (!Blocks.empty()) {
-        auto CurBB = Blocks.pop_back_val();
+        auto *CurBB = Blocks.pop_back_val();
         auto I = CurBB->rbegin(), E = CurBB->rend();
         if (I != E) {
           if (I->isUnconditionalBranch() || I->getOpcode() == AMDGPU::S_ENDPGM)
@@ -474,7 +477,8 @@ bool SIOptimizeExecMaskingPreRA::runOnMachineFunction(MachineFunction &MF) {
       Register SavedExec = I->getOperand(0).getReg();
       if (SavedExec.isVirtual() && MRI->hasOneNonDBGUse(SavedExec)) {
         MachineInstr *SingleExecUser = &*MRI->use_instr_nodbg_begin(SavedExec);
-        int Idx = SingleExecUser->findRegisterUseOperandIdx(SavedExec);
+        int Idx = SingleExecUser->findRegisterUseOperandIdx(SavedExec,
+                                                            /*TRI=*/nullptr);
         assert(Idx != -1);
         if (SingleExecUser->getParent() == I->getParent() &&
             !SingleExecUser->getOperand(Idx).isImplicit() &&

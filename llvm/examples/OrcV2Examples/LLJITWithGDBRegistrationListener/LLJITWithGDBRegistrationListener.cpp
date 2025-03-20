@@ -62,8 +62,7 @@ int main(int argc, char *argv[]) {
   auto J =
       ExitOnErr(LLJITBuilder()
                     .setJITTargetMachineBuilder(std::move(JTMB))
-                    .setObjectLinkingLayerCreator([&](ExecutionSession &ES,
-                                                      const Triple &TT) {
+                    .setObjectLinkingLayerCreator([&](ExecutionSession &ES) {
                       auto GetMemMgr = []() {
                         return std::make_unique<SectionMemoryManager>();
                       };
@@ -81,17 +80,6 @@ int main(int argc, char *argv[]) {
                       return ObjLinkingLayer;
                     })
                     .create());
-
-  // Make sure that our process symbols are visible to JIT'd code.
-  {
-    MangleAndInterner Mangle(J->getExecutionSession(), J->getDataLayout());
-    J->getMainJITDylib().addGenerator(
-        ExitOnErr(orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
-            J->getDataLayout().getGlobalPrefix(),
-            [MainName = Mangle("main")](const orc::SymbolStringPtr &Name) {
-              return Name != MainName;
-            })));
-  }
 
   // Load the input modules.
   for (auto &InputFile : InputFiles) {

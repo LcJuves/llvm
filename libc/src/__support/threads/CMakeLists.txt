@@ -5,11 +5,17 @@ add_header_library(
 )
 
 add_header_library(
-  thread_attrib
+  sleep
   HDRS
-    thread_attrib.h
+    sleep.h
+)
+
+add_header_library(
+  spin_lock
+  HDRS
+    spin_lock.h
   DEPENDS
-    libc.src.__support.common
+    .sleep
     libc.src.__support.CPP.atomic
 )
 
@@ -25,20 +31,77 @@ if(TARGET libc.src.__support.threads.${LIBC_TARGET_OS}.mutex)
     DEPENDS
       .${LIBC_TARGET_OS}.mutex
   )
+
+  add_object_library(
+    fork_callbacks
+    SRCS
+      fork_callbacks.cpp
+    HDRS
+      fork_callbacks.h
+    DEPENDS
+      .mutex
+      libc.src.__support.CPP.mutex
+  )
 endif()
+
+add_header_library(
+  thread_common
+  HDRS
+    thread.h
+  DEPENDS
+    libc.src.__support.common
+    libc.src.__support.CPP.atomic
+    libc.src.__support.CPP.optional
+    libc.src.__support.CPP.string_view
+    libc.src.__support.CPP.stringstream
+)
 
 if(TARGET libc.src.__support.threads.${LIBC_TARGET_OS}.thread)
   add_object_library(
     thread
-    HDRS
-      thread.h
     SRCS
-      ${LIBC_TARGET_OS}/thread.cpp
+      thread.cpp
     DEPENDS
-      .thread_attrib
-    COMPILE_OPTIONS
-      -O3
-      -fno-omit-frame-pointer # This allows us to sniff out the thread args from
-                              # the new thread's stack reliably.
+      .mutex
+      .${LIBC_TARGET_OS}.thread
+      libc.src.__support.common
+      libc.src.__support.fixedvector
+      libc.src.__support.CPP.array
+      libc.src.__support.CPP.mutex
+      libc.src.__support.CPP.optional
   )
 endif()
+
+if(TARGET libc.src.__support.threads.${LIBC_TARGET_OS}.callonce)
+  add_object_library(
+    callonce
+    ALIAS
+    DEPENDS
+      .${LIBC_TARGET_OS}.callonce
+  )
+endif()
+
+if(TARGET libc.src.__support.threads.${LIBC_TARGET_OS}.CndVar)
+  add_object_library(
+    CndVar
+    ALIAS
+    DEPENDS
+    .${LIBC_TARGET_OS}.CndVar
+  )
+endif()
+
+if (LLVM_LIBC_FULL_BUILD)
+  set(identifier_dependency_on_thread libc.src.__support.threads.thread)
+endif()
+
+add_header_library(
+  identifier
+  HDRS
+    identifier.h
+  DEPENDS
+    libc.src.__support.OSUtil.osutil
+    libc.src.__support.common
+    libc.include.sys_syscall
+    libc.hdr.types.pid_t
+    ${identifier_dependency_on_thread}
+)

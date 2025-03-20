@@ -2,14 +2,12 @@
 
 
 import lldb
-import unittest2
 from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
 import lldbsuite.test.lldbutil as lldbutil
 
 
 class SharedLibTestCase(TestBase):
-
     def setUp(self):
         # Call super's setUp().
         TestBase.setUp(self)
@@ -61,7 +59,7 @@ class SharedLibTestCase(TestBase):
         lldbutil.check_breakpoint(self, bpno=1, expected_hit_count=1)
 
         thread = process.GetSelectedThread()
-        stack_frames = lldbutil.get_stack_frames(thread)
+        stack_frames = thread.frames
         self.assertGreater(len(stack_frames), 2)
 
         leaf_frame = stack_frames[0]
@@ -99,7 +97,7 @@ class SharedLibTestCase(TestBase):
         lldbutil.check_breakpoint(self, bpno=1, expected_hit_count=1)
 
         thread = process.GetSelectedThread()
-        stack_frames = lldbutil.get_stack_frames(thread)
+        stack_frames = thread.frames
         self.assertGreater(len(stack_frames), 2)
 
         leaf_frame = stack_frames[0]

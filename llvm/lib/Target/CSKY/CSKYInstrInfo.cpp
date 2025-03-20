@@ -330,7 +330,7 @@ Register CSKYInstrInfo::movImm(MachineBasicBlock &MBB,
   return DstReg;
 }
 
-unsigned CSKYInstrInfo::isLoadFromStackSlot(const MachineInstr &MI,
+Register CSKYInstrInfo::isLoadFromStackSlot(const MachineInstr &MI,
                                             int &FrameIndex) const {
   switch (MI.getOpcode()) {
   default:
@@ -360,7 +360,7 @@ unsigned CSKYInstrInfo::isLoadFromStackSlot(const MachineInstr &MI,
   return 0;
 }
 
-unsigned CSKYInstrInfo::isStoreToStackSlot(const MachineInstr &MI,
+Register CSKYInstrInfo::isStoreToStackSlot(const MachineInstr &MI,
                                            int &FrameIndex) const {
   switch (MI.getOpcode()) {
   default:
@@ -392,7 +392,9 @@ void CSKYInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
                                         MachineBasicBlock::iterator I,
                                         Register SrcReg, bool IsKill, int FI,
                                         const TargetRegisterClass *RC,
-                                        const TargetRegisterInfo *TRI) const {
+                                        const TargetRegisterInfo *TRI,
+                                        Register VReg,
+                                        MachineInstr::MIFlag Flags) const {
   DebugLoc DL;
   if (I != MBB.end())
     DL = I->getDebugLoc();
@@ -431,11 +433,10 @@ void CSKYInstrInfo::storeRegToStackSlot(MachineBasicBlock &MBB,
       .addMemOperand(MMO);
 }
 
-void CSKYInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
-                                         MachineBasicBlock::iterator I,
-                                         Register DestReg, int FI,
-                                         const TargetRegisterClass *RC,
-                                         const TargetRegisterInfo *TRI) const {
+void CSKYInstrInfo::loadRegFromStackSlot(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator I, Register DestReg,
+    int FI, const TargetRegisterClass *RC, const TargetRegisterInfo *TRI,
+    Register VReg, MachineInstr::MIFlag Flags) const {
   DebugLoc DL;
   if (I != MBB.end())
     DL = I->getDebugLoc();
@@ -475,8 +476,9 @@ void CSKYInstrInfo::loadRegFromStackSlot(MachineBasicBlock &MBB,
 
 void CSKYInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
                                 MachineBasicBlock::iterator I,
-                                const DebugLoc &DL, MCRegister DestReg,
-                                MCRegister SrcReg, bool KillSrc) const {
+                                const DebugLoc &DL, Register DestReg,
+                                Register SrcReg, bool KillSrc,
+                                bool RenamableDest, bool RenamableSrc) const {
   if (CSKY::GPRRegClass.contains(SrcReg) &&
       CSKY::CARRYRegClass.contains(DestReg)) {
     if (STI.hasE2()) {
@@ -518,7 +520,7 @@ void CSKYInstrInfo::copyPhysReg(MachineBasicBlock &MBB,
 
   unsigned Opcode = 0;
   if (CSKY::GPRRegClass.contains(DestReg, SrcReg))
-    Opcode = CSKY::MOV32;
+    Opcode = STI.hasE2() ? CSKY::MOV32 : CSKY::MOV16;
   else if (v2sf && CSKY::sFPR32RegClass.contains(DestReg, SrcReg))
     Opcode = CSKY::FMOV_S;
   else if (v3sf && CSKY::FPR32RegClass.contains(DestReg, SrcReg))

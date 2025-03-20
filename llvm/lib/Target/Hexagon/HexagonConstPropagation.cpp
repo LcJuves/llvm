@@ -101,7 +101,7 @@ namespace {
 
   // Lattice cell, based on that was described in the W-Z paper on constant
   // propagation.
-  // Latice cell will be allowed to hold multiple constant values. While
+  // Lattice cell will be allowed to hold multiple constant values. While
   // multiple values would normally indicate "bottom", we can still derive
   // some useful information from them. For example, comparison X > 0
   // could be folded if all the values in the cell associated with X are
@@ -357,7 +357,6 @@ namespace {
 
     bool getCell(const RegisterSubReg &R, const CellMap &Inputs, LatticeCell &RC);
     bool constToInt(const Constant *C, APInt &Val) const;
-    bool constToFloat(const Constant *C, APFloat &Val) const;
     const ConstantInt *intToConst(const APInt &Val) const;
 
     // Compares.
@@ -796,7 +795,7 @@ void MachineConstPropagator::visitUsesOf(unsigned Reg) {
   LLVM_DEBUG(dbgs() << "Visiting uses of " << printReg(Reg, &MCE.TRI)
                     << Cells.get(Reg) << '\n');
   for (MachineInstr &MI : MRI->use_nodbg_instructions(Reg)) {
-    // Do not process non-executable instructions. They can become exceutable
+    // Do not process non-executable instructions. They can become executable
     // later (via a flow-edge in the work queue). In such case, the instruc-
     // tion will be visited at that time.
     if (!InstrExec.count(&MI))
@@ -1687,9 +1686,9 @@ bool MachineConstEvaluator::evaluateCLBi(const APInt &A1, bool Zeros,
     return false;
   unsigned Count = 0;
   if (Zeros && (Count == 0))
-    Count = A1.countLeadingZeros();
+    Count = A1.countl_zero();
   if (Ones && (Count == 0))
-    Count = A1.countLeadingOnes();
+    Count = A1.countl_one();
   Result = APInt(BW, static_cast<uint64_t>(Count), false);
   return true;
 }
@@ -1722,9 +1721,9 @@ bool MachineConstEvaluator::evaluateCTBi(const APInt &A1, bool Zeros,
     return false;
   unsigned Count = 0;
   if (Zeros && (Count == 0))
-    Count = A1.countTrailingZeros();
+    Count = A1.countr_zero();
   if (Ones && (Count == 0))
-    Count = A1.countTrailingOnes();
+    Count = A1.countr_one();
   Result = APInt(BW, static_cast<uint64_t>(Count), false);
   return true;
 }
@@ -2269,7 +2268,7 @@ bool HexagonConstEvaluator::evaluate(const MachineInstr &BrI,
     case Hexagon::J2_jumpfnew:
     case Hexagon::J2_jumpfnewpt:
       Negated = true;
-      LLVM_FALLTHROUGH;
+      [[fallthrough]];
     case Hexagon::J2_jumpt:
     case Hexagon::J2_jumptnew:
     case Hexagon::J2_jumptnewpt:
@@ -2504,7 +2503,8 @@ APInt HexagonConstEvaluator::getCmpImm(unsigned Opc, unsigned OpX,
   }
 
   uint64_t Val = MO.getImm();
-  return APInt(32, Val, Signed);
+  // TODO: Is implicitTrunc correct here?
+  return APInt(32, Val, Signed, /*implicitTrunc=*/true);
 }
 
 void HexagonConstEvaluator::replaceWithNop(MachineInstr &MI) {
@@ -2861,8 +2861,7 @@ bool HexagonConstEvaluator::rewriteHexConstDefs(MachineInstr &MI,
   // For each defined register, if it is a constant, create an instruction
   //   NewR = const
   // and replace all uses of the defined register with NewR.
-  for (unsigned i = 0, n = DefRegs.size(); i < n; ++i) {
-    unsigned R = DefRegs[i];
+  for (unsigned R : DefRegs) {
     const LatticeCell &L = Inputs.get(R);
     if (L.isBottom())
       continue;

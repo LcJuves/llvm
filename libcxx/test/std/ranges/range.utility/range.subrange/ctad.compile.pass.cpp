@@ -7,14 +7,14 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03, c++11, c++14, c++17
-// UNSUPPORTED: libcpp-has-no-incomplete-ranges
 
 // class std::ranges::subrange;
 
 #include <ranges>
 
 #include <cassert>
-#include "test_macros.h"
+#include <cstddef>
+
 #include "test_iterators.h"
 
 using FI = forward_iterator<int*>;

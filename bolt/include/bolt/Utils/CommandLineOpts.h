@@ -18,7 +18,7 @@
 namespace opts {
 
 extern bool HeatmapMode;
-extern bool LinuxKernelMode;
+extern bool BinaryAnalysisMode;
 
 extern llvm::cl::OptionCategory BoltCategory;
 extern llvm::cl::OptionCategory BoltDiffCategory;
@@ -28,6 +28,7 @@ extern llvm::cl::OptionCategory BoltOutputCategory;
 extern llvm::cl::OptionCategory AggregatorCategory;
 extern llvm::cl::OptionCategory BoltInstrCategory;
 extern llvm::cl::OptionCategory HeatmapCategory;
+extern llvm::cl::OptionCategory BinaryAnalysisCategory;
 
 extern llvm::cl::opt<unsigned> AlignText;
 extern llvm::cl::opt<unsigned> AlignFunctions;
@@ -35,19 +36,28 @@ extern llvm::cl::opt<bool> AggregateOnly;
 extern llvm::cl::opt<unsigned> BucketsPerLine;
 extern llvm::cl::opt<bool> DiffOnly;
 extern llvm::cl::opt<bool> EnableBAT;
+extern llvm::cl::opt<bool> EqualizeBBCounts;
 extern llvm::cl::opt<bool> RemoveSymtab;
 extern llvm::cl::opt<unsigned> ExecutionCountThreshold;
 extern llvm::cl::opt<unsigned> HeatmapBlock;
 extern llvm::cl::opt<unsigned long long> HeatmapMaxAddress;
 extern llvm::cl::opt<unsigned long long> HeatmapMinAddress;
+extern llvm::cl::opt<bool> HeatmapPrintMappings;
 extern llvm::cl::opt<bool> HotData;
 extern llvm::cl::opt<bool> HotFunctionsAtEnd;
 extern llvm::cl::opt<bool> HotText;
+extern llvm::cl::opt<bool> Hugify;
 extern llvm::cl::opt<bool> Instrument;
 extern llvm::cl::opt<std::string> OutputFilename;
 extern llvm::cl::opt<std::string> PerfData;
 extern llvm::cl::opt<bool> PrintCacheMetrics;
 extern llvm::cl::opt<bool> PrintSections;
+
+// The format to use with -o in aggregation mode (perf2bolt)
+enum ProfileFormatKind { PF_Fdata, PF_YAML };
+
+extern llvm::cl::opt<ProfileFormatKind> ProfileFormat;
+extern llvm::cl::opt<bool> ShowDensity;
 extern llvm::cl::opt<bool> SplitEH;
 extern llvm::cl::opt<bool> StrictMode;
 extern llvm::cl::opt<bool> TimeOpts;
@@ -69,6 +79,10 @@ extern llvm::cl::opt<unsigned> Verbosity;
 
 /// Return true if we should process all functions in the binary.
 bool processAllFunctions();
+
+enum GadgetScannerKind { GS_PACRET, GS_ALL };
+
+extern llvm::cl::list<GadgetScannerKind> GadgetScannersToRun;
 
 } // namespace opts
 

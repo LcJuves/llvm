@@ -9,7 +9,6 @@
 #include "MCTargetDesc/SparcFixupKinds.h"
 #include "MCTargetDesc/SparcMCExpr.h"
 #include "MCTargetDesc/SparcMCTargetDesc.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/MC/MCELFObjectWriter.h"
 #include "llvm/MC/MCExpr.h"
 #include "llvm/MC/MCObjectWriter.h"
@@ -21,10 +20,12 @@ using namespace llvm;
 namespace {
   class SparcELFObjectWriter : public MCELFObjectTargetWriter {
   public:
-    SparcELFObjectWriter(bool Is64Bit, uint8_t OSABI)
-      : MCELFObjectTargetWriter(Is64Bit, OSABI,
-                                Is64Bit ?  ELF::EM_SPARCV9 : ELF::EM_SPARC,
-                                /*HasRelocationAddend*/ true) {}
+    SparcELFObjectWriter(bool Is64Bit, bool IsV8Plus, uint8_t OSABI)
+        : MCELFObjectTargetWriter(
+              Is64Bit, OSABI,
+              Is64Bit ? ELF::EM_SPARCV9
+                      : (IsV8Plus ? ELF::EM_SPARC32PLUS : ELF::EM_SPARC),
+              /*HasRelocationAddend*/ true) {}
 
     ~SparcELFObjectWriter() override = default;
 
@@ -32,9 +33,8 @@ namespace {
     unsigned getRelocType(MCContext &Ctx, const MCValue &Target,
                           const MCFixup &Fixup, bool IsPCRel) const override;
 
-    bool needsRelocateWithSymbol(const MCSymbol &Sym,
+    bool needsRelocateWithSymbol(const MCValue &Val, const MCSymbol &Sym,
                                  unsigned Type) const override;
-
   };
 }
 
@@ -45,6 +45,30 @@ unsigned SparcELFObjectWriter::getRelocType(MCContext &Ctx,
   MCFixupKind Kind = Fixup.getKind();
   if (Kind >= FirstLiteralRelocationKind)
     return Kind - FirstLiteralRelocationKind;
+
+  switch (Target.getRefKind()) {
+  case SparcMCExpr::VK_Sparc_TLS_GD_HI22:
+  case SparcMCExpr::VK_Sparc_TLS_GD_LO10:
+  case SparcMCExpr::VK_Sparc_TLS_GD_ADD:
+  case SparcMCExpr::VK_Sparc_TLS_LDM_HI22:
+  case SparcMCExpr::VK_Sparc_TLS_LDM_LO10:
+  case SparcMCExpr::VK_Sparc_TLS_LDM_ADD:
+  case SparcMCExpr::VK_Sparc_TLS_LDO_HIX22:
+  case SparcMCExpr::VK_Sparc_TLS_LDO_LOX10:
+  case SparcMCExpr::VK_Sparc_TLS_LDO_ADD:
+  case SparcMCExpr::VK_Sparc_TLS_IE_HI22:
+  case SparcMCExpr::VK_Sparc_TLS_IE_LO10:
+  case SparcMCExpr::VK_Sparc_TLS_IE_LD:
+  case SparcMCExpr::VK_Sparc_TLS_IE_LDX:
+  case SparcMCExpr::VK_Sparc_TLS_IE_ADD:
+  case SparcMCExpr::VK_Sparc_TLS_LE_HIX22:
+  case SparcMCExpr::VK_Sparc_TLS_LE_LOX10:
+    if (auto *S = Target.getSymA())
+      cast<MCSymbolELF>(S->getSymbol()).setType(ELF::STT_TLS);
+    break;
+  default:
+    break;
+  }
 
   if (const SparcMCExpr *SExpr = dyn_cast<SparcMCExpr>(Fixup.getValue())) {
     if (SExpr->getKind() == SparcMCExpr::VK_Sparc_R_DISP32)
@@ -62,6 +86,8 @@ unsigned SparcELFObjectWriter::getRelocType(MCContext &Ctx,
     case Sparc::fixup_sparc_call30:  return ELF::R_SPARC_WDISP30;
     case Sparc::fixup_sparc_br22:    return ELF::R_SPARC_WDISP22;
     case Sparc::fixup_sparc_br19:    return ELF::R_SPARC_WDISP19;
+    case Sparc::fixup_sparc_br16:
+      return ELF::R_SPARC_WDISP16;
     case Sparc::fixup_sparc_pc22:    return ELF::R_SPARC_PC22;
     case Sparc::fixup_sparc_pc10:    return ELF::R_SPARC_PC10;
     case Sparc::fixup_sparc_wplt30:  return ELF::R_SPARC_WPLT30;
@@ -122,8 +148,9 @@ unsigned SparcELFObjectWriter::getRelocType(MCContext &Ctx,
   return ELF::R_SPARC_NONE;
 }
 
-bool SparcELFObjectWriter::needsRelocateWithSymbol(const MCSymbol &Sym,
-                                                 unsigned Type) const {
+bool SparcELFObjectWriter::needsRelocateWithSymbol(const MCValue &,
+                                                   const MCSymbol &,
+                                                   unsigned Type) const {
   switch (Type) {
     default:
       return false;
@@ -144,6 +171,6 @@ bool SparcELFObjectWriter::needsRelocateWithSymbol(const MCSymbol &Sym,
 }
 
 std::unique_ptr<MCObjectTargetWriter>
-llvm::createSparcELFObjectWriter(bool Is64Bit, uint8_t OSABI) {
-  return std::make_unique<SparcELFObjectWriter>(Is64Bit, OSABI);
+llvm::createSparcELFObjectWriter(bool Is64Bit, bool IsV8Plus, uint8_t OSABI) {
+  return std::make_unique<SparcELFObjectWriter>(Is64Bit, IsV8Plus, OSABI);
 }

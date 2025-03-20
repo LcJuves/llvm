@@ -13,15 +13,19 @@
 #include "lld/Common/LLVM.h"
 #include <vector>
 
-namespace lld {
-namespace macho {
+namespace lld::macho {
 class Symbol;
+class Defined;
 
 void markAddrSigSymbols();
 void markSymAsAddrSig(Symbol *s);
-void foldIdenticalSections();
+void foldIdenticalSections(bool onlyCfStrings);
 
-} // namespace macho
-} // namespace lld
+// Given a symbol that was folded into a thunk, return the symbol pointing to
+// the actual body of the function. We expose this function to allow getting the
+// main function body for a symbol that was folded via a thunk.
+Defined *getBodyForThunkFoldedSym(Defined *foldedSym);
+
+} // namespace lld::macho
 
 #endif

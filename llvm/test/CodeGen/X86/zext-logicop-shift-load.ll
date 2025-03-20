@@ -55,7 +55,7 @@ define i64 @test3(ptr %data) {
 ; X86-LABEL: test3:
 ; X86:       # %bb.0: # %entry
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
-; X86-NEXT:    movb (%eax), %al
+; X86-NEXT:    movzbl (%eax), %eax
 ; X86-NEXT:    shlb $2, %al
 ; X86-NEXT:    xorb $60, %al
 ; X86-NEXT:    movzbl %al, %eax
@@ -64,7 +64,7 @@ define i64 @test3(ptr %data) {
 ;
 ; X64-LABEL: test3:
 ; X64:       # %bb.0: # %entry
-; X64-NEXT:    movb (%rdi), %al
+; X64-NEXT:    movzbl (%rdi), %eax
 ; X64-NEXT:    shlb $2, %al
 ; X64-NEXT:    xorb $60, %al
 ; X64-NEXT:    movzbl %al, %eax
@@ -89,9 +89,9 @@ define i64 @test4(ptr %data) {
 ;
 ; X64-LABEL: test4:
 ; X64:       # %bb.0: # %entry
-; X64-NEXT:    movl (%rdi), %eax
-; X64-NEXT:    shrq $2, %rax
-; X64-NEXT:    andl $60, %eax
+; X64-NEXT:    movzbl (%rdi), %eax
+; X64-NEXT:    shrl $2, %eax
+; X64-NEXT:    andl $-4, %eax
 ; X64-NEXT:    retq
 entry:
   %bf.load = load i8, ptr %data, align 4
@@ -114,7 +114,7 @@ define i64 @test5(ptr %data) {
 ; X64-LABEL: test5:
 ; X64:       # %bb.0: # %entry
 ; X64-NEXT:    movzbl (%rdi), %eax
-; X64-NEXT:    shrq $2, %rax
+; X64-NEXT:    shrl $2, %eax
 ; X64-NEXT:    xorq $60, %rax
 ; X64-NEXT:    retq
 entry:
@@ -138,7 +138,7 @@ define i64 @test6(ptr %data) {
 ; X64-LABEL: test6:
 ; X64:       # %bb.0: # %entry
 ; X64-NEXT:    movzbl (%rdi), %eax
-; X64-NEXT:    shrq $2, %rax
+; X64-NEXT:    shrl $2, %eax
 ; X64-NEXT:    orq $60, %rax
 ; X64-NEXT:    retq
 entry:

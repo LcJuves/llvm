@@ -16,6 +16,7 @@ namespace llvm {
 namespace LoongArchMatInt {
 struct Inst {
   unsigned Opc;
+  // Imm: Opc's imm operand, if Opc == BSTRINS_D, Imm = MSB << 32 | LSB.
   int64_t Imm;
   Inst(unsigned Opc, int64_t Imm) : Opc(Opc), Imm(Imm) {}
 };
@@ -24,7 +25,7 @@ using InstSeq = SmallVector<Inst, 4>;
 // Helper to generate an instruction sequence that will materialise the given
 // immediate value into a register.
 InstSeq generateInstSeq(int64_t Val);
-} // namespace LoongArchMatInt
-} // namespace llvm
+} // end namespace LoongArchMatInt
+} // end namespace llvm
 
 #endif

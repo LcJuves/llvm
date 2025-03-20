@@ -1192,7 +1192,7 @@ define i1 @ult_ult(i8 %a, i8 %b) {
 
 define <2 x i1> @ult_uge_vec(<2 x i8> %a, <2 x i8> %b) {
 ; CHECK-LABEL: @ult_uge_vec(
-; CHECK-NEXT:    ret <2 x i1> <i1 true, i1 true>
+; CHECK-NEXT:    ret <2 x i1> splat (i1 true)
 ;
   %cmp1 = icmp ult <2 x i8> %a, %b
   %cmp2 = icmp uge <2 x i8> %a, %b
@@ -1233,3 +1233,12 @@ define i1 @ult_ule_swap(i8 %a, i8 %b) {
   ret i1 %or
 }
 
+define i1 @ule_ule_swap(i8 %a, i8 %b) {
+; CHECK-LABEL: @ule_ule_swap(
+; CHECK-NEXT:    ret i1 true
+;
+  %cmp1 = icmp ule i8 %a, %b
+  %cmp2 = icmp ule i8 %b, %a
+  %or = or i1 %cmp1, %cmp2
+  ret i1 %or
+}

@@ -1,7 +1,11 @@
-! RUN: bbc %s -o - | tco | FileCheck %s
-! RUN: %flang -emit-llvm -S -mmlir -disable-external-name-interop %s -o - | FileCheck %s
+! RUN: bbc -hlfir=false %s -o - | tco | FileCheck %s
+! RUN: %flang -emit-llvm -flang-deprecated-no-hlfir -S -mmlir -disable-external-name-interop %s -o - | FileCheck %s
 ! Test from Fortran source through to LLVM IR.
 ! UNSUPPORTED: system-windows
+! Disabled on 32-bit targets due to the additional `trunc` opcodes required
+! UNSUPPORTED: target-x86
+! UNSUPPORTED: target=sparc-{{.*}}
+! UNSUPPORTED: target=sparcel-{{.*}}
 
 ! Assumed size array of assumed length character.
 program test
@@ -17,7 +21,7 @@ contains
   end subroutine sub
 end program test
 
-! CHECK-LABEL: define void @_QFPsub(
+! CHECK-LABEL: define internal void @_QFPsub(
 ! CHECK-SAME:    ptr %[[arg:.*]])
 ! CHECK: %[[extent:.*]] = getelementptr { {{.*}}, [1 x [3 x i64]] }, ptr %[[arg]], i32 0, i32 7, i64 0, i32 1
 ! CHECK: %[[extval:.*]] = load i64, ptr %[[extent]]

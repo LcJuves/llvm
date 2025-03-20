@@ -129,8 +129,6 @@ bool ASTResultSynthesizer::SynthesizeFunctionResult(FunctionDecl *FunDecl) {
 
     function_decl->print(os);
 
-    os.flush();
-
     LLDB_LOGF(log, "Untransformed function AST:\n%s", s.c_str());
   }
 
@@ -144,8 +142,6 @@ bool ASTResultSynthesizer::SynthesizeFunctionResult(FunctionDecl *FunDecl) {
     raw_string_ostream os(s);
 
     function_decl->print(os);
-
-    os.flush();
 
     LLDB_LOGF(log, "Transformed function AST:\n%s", s.c_str());
   }
@@ -169,8 +165,6 @@ bool ASTResultSynthesizer::SynthesizeObjCMethodResult(
 
     MethodDecl->print(os);
 
-    os.flush();
-
     LLDB_LOGF(log, "Untransformed method AST:\n%s", s.c_str());
   }
 
@@ -189,12 +183,31 @@ bool ASTResultSynthesizer::SynthesizeObjCMethodResult(
 
     MethodDecl->print(os);
 
-    os.flush();
-
     LLDB_LOGF(log, "Transformed method AST:\n%s", s.c_str());
   }
 
   return ret;
+}
+
+/// Returns true if LLDB can take the address of the given lvalue for the sake
+/// of capturing the expression result. Returns false if LLDB should instead
+/// store the expression result in a result variable.
+static bool CanTakeAddressOfLValue(const Expr *lvalue_expr) {
+  assert(lvalue_expr->getValueKind() == VK_LValue &&
+         "lvalue_expr not a lvalue");
+
+  QualType qt = lvalue_expr->getType();
+  // If the lvalue has const-qualified non-volatile integral or enum type, then
+  // the underlying value might come from a const static data member as
+  // described in C++11 [class.static.data]p3. If that's the case, then the
+  // value might not have an address if the user didn't also define the member
+  // in a namespace scope. Taking the address would cause that LLDB later fails
+  // to link the expression, so those lvalues should be stored in a result
+  // variable.
+  if (qt->isIntegralOrEnumerationType() && qt.isConstQualified() &&
+      !qt.isVolatileQualified())
+    return false;
+  return true;
 }
 
 bool ASTResultSynthesizer::SynthesizeBodyResult(CompoundStmt *Body,
@@ -265,6 +278,10 @@ bool ASTResultSynthesizer::SynthesizeBodyResult(CompoundStmt *Body,
   //   - During dematerialization, $0 is marked up as a load address with value
   //     equal to the contents of the structure entry.
   //
+  //   - Note: if we cannot take an address of the resulting Lvalue (e.g. it's
+  //     a static const member without an out-of-class definition), then we
+  //     follow the Rvalue route.
+  //
   // For Rvalues
   //
   //   - In AST result synthesis the expression E is transformed into an
@@ -304,7 +321,7 @@ bool ASTResultSynthesizer::SynthesizeBodyResult(CompoundStmt *Body,
 
   clang::VarDecl *result_decl = nullptr;
 
-  if (is_lvalue) {
+  if (is_lvalue && CanTakeAddressOfLValue(last_expr)) {
     IdentifierInfo *result_ptr_id;
 
     if (expr_type->isFunctionType())
@@ -404,15 +421,10 @@ void ASTResultSynthesizer::MaybeRecordPersistentType(TypeDecl *D) {
     return;
 
   StringRef name = D->getName();
-
-  if (name.size() == 0 || name[0] != '$')
+  if (name.empty() || name.front() != '$')
     return;
 
-  Log *log = GetLog(LLDBLog::Expressions);
-
-  ConstString name_cs(name.str().c_str());
-
-  LLDB_LOGF(log, "Recording persistent type %s\n", name_cs.GetCString());
+  LLDB_LOG(GetLog(LLDBLog::Expressions), "Recording persistent type {0}", name);
 
   m_decls.push_back(D);
 }
@@ -424,15 +436,10 @@ void ASTResultSynthesizer::RecordPersistentDecl(NamedDecl *D) {
     return;
 
   StringRef name = D->getName();
-
-  if (name.size() == 0)
+  if (name.empty())
     return;
 
-  Log *log = GetLog(LLDBLog::Expressions);
-
-  ConstString name_cs(name.str().c_str());
-
-  LLDB_LOGF(log, "Recording persistent decl %s\n", name_cs.GetCString());
+  LLDB_LOG(GetLog(LLDBLog::Expressions), "Recording persistent decl {0}", name);
 
   m_decls.push_back(D);
 }
@@ -445,15 +452,14 @@ void ASTResultSynthesizer::CommitPersistentDecls() {
 
   auto *persistent_vars = llvm::cast<ClangPersistentVariables>(state);
 
-  TypeSystemClang *scratch_ctx = ScratchTypeSystemClang::GetForTarget(
+  lldb::TypeSystemClangSP scratch_ts_sp = ScratchTypeSystemClang::GetForTarget(
       m_target, m_ast_context->getLangOpts());
 
   for (clang::NamedDecl *decl : m_decls) {
     StringRef name = decl->getName();
-    ConstString name_cs(name.str().c_str());
 
     Decl *D_scratch = persistent_vars->GetClangASTImporter()->DeportDecl(
-        &scratch_ctx->getASTContext(), decl);
+        &scratch_ts_sp->getASTContext(), decl);
 
     if (!D_scratch) {
       Log *log = GetLog(LLDBLog::Expressions);
@@ -462,7 +468,6 @@ void ASTResultSynthesizer::CommitPersistentDecls() {
         std::string s;
         llvm::raw_string_ostream ss(s);
         decl->dump(ss);
-        ss.flush();
 
         LLDB_LOGF(log, "Couldn't commit persistent  decl: %s\n", s.c_str());
       }
@@ -471,8 +476,8 @@ void ASTResultSynthesizer::CommitPersistentDecls() {
     }
 
     if (NamedDecl *NamedDecl_scratch = dyn_cast<NamedDecl>(D_scratch))
-      persistent_vars->RegisterPersistentDecl(name_cs, NamedDecl_scratch,
-                                              scratch_ctx);
+      persistent_vars->RegisterPersistentDecl(ConstString(name),
+                                              NamedDecl_scratch, scratch_ts_sp);
   }
 }
 

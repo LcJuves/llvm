@@ -3,9 +3,9 @@
 |* Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 |* See https://llvm.org/LICENSE.txt for license information.
 |* SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-|* 
+|*
 |*===----------------------------------------------------------------------===*|
-|* 
+|*
 |* This file implements the call back routines for the gcov profiling
 |* instrumentation pass. Link against this library when running code through
 |* the -insert-gcov-profiling LLVM pass.
@@ -65,7 +65,7 @@ static char *filename = NULL;
 
 /*
  * The current file we're outputting.
- */ 
+ */
 static FILE *output_file = NULL;
 
 /*
@@ -264,11 +264,6 @@ static int map_file(void) {
 
 static void unmap_file(void) {
 #if defined(_WIN32)
-  if (!FlushViewOfFile(write_buffer, file_size)) {
-    fprintf(stderr, "profiling: %s: cannot flush mapped view: %lu\n", filename,
-            GetLastError());
-  }
-
   if (!UnmapViewOfFile(write_buffer)) {
     fprintf(stderr, "profiling: %s: cannot unmap mapped view: %lu\n", filename,
             GetLastError());
@@ -589,7 +584,7 @@ void llvm_reset_counters(void) {
   }
 }
 
-#if !defined(_WIN32)
+#if !defined(_WIN32) && !defined(__wasm__)
 COMPILER_RT_VISIBILITY
 pid_t __gcov_fork() {
   pid_t parent_pid = getpid();
@@ -622,12 +617,31 @@ void llvm_gcov_init(fn_ptr wfn, fn_ptr rfn) {
     atexit_ran = 1;
 
     /* Make sure we write out the data and delete the data structures. */
-    atexit(llvm_delete_reset_function_list);
+    lprofAtExit(llvm_delete_reset_function_list);
 #ifdef _WIN32
-    atexit(llvm_writeout_and_clear);
+    lprofAtExit(llvm_writeout_and_clear);
 #endif
   }
 }
+
+#if defined(_AIX)
+COMPILER_RT_VISIBILITY __attribute__((constructor)) void
+__llvm_profile_gcov_initialize() {
+  const __llvm_gcov_init_func_struct *InitFuncStart =
+      __llvm_profile_begin_covinit();
+  const __llvm_gcov_init_func_struct *InitFuncEnd =
+      __llvm_profile_end_covinit();
+
+  for (const __llvm_gcov_init_func_struct *Ptr = InitFuncStart;
+       Ptr != InitFuncEnd; ++Ptr) {
+    fn_ptr wfn = (fn_ptr)Ptr->WriteoutFunction;
+    fn_ptr rfn = (fn_ptr)Ptr->ResetFunction;
+    if (!(wfn && rfn))
+      continue;
+    llvm_gcov_init(wfn, rfn);
+  }
+}
+#endif
 
 void __gcov_dump(void) {
   for (struct fn_node *f = writeout_fn_list.head; f; f = f->next)

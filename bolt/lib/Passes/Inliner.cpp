@@ -27,7 +27,6 @@
 #include "bolt/Passes/Inliner.h"
 #include "bolt/Core/MCPlus.h"
 #include "llvm/Support/CommandLine.h"
-#include <map>
 
 #define DEBUG_TYPE "bolt-inliner"
 
@@ -49,6 +48,12 @@ ForceInlineFunctions("force-inline",
   cl::value_desc("func1,func2,func3,..."),
   cl::Hidden,
   cl::cat(BoltOptCategory));
+
+static cl::list<std::string> SkipInlineFunctions(
+    "skip-inline", cl::CommaSeparated,
+    cl::desc("list of functions to never consider for inlining"),
+    cl::value_desc("func1,func2,func3,..."), cl::Hidden,
+    cl::cat(BoltOptCategory));
 
 static cl::opt<bool> InlineAll("inline-all", cl::desc("inline all functions"),
                                cl::cat(BoltOptCategory));
@@ -104,6 +109,12 @@ bool mustConsider(const llvm::bolt::BinaryFunction &Function) {
     if (Function.hasName(Name))
       return true;
   return false;
+}
+
+bool mustSkip(const llvm::bolt::BinaryFunction &Function) {
+  return llvm::any_of(opts::SkipInlineFunctions, [&](const std::string &Name) {
+    return Function.hasName(Name);
+  });
 }
 
 void syncOptions() {
@@ -165,8 +176,8 @@ InliningInfo getInliningInfo(const BinaryFunction &BF) {
       return INL_NONE;
 
     const MCPhysReg SPReg = BC.MIB->getStackPointer();
-    for (const BinaryBasicBlock *BB : BF.layout()) {
-      for (const MCInst &Inst : *BB) {
+    for (const BinaryBasicBlock &BB : BF) {
+      for (const MCInst &Inst : BB) {
         // Tail calls are marked as implicitly using the stack pointer and they
         // could be inlined.
         if (BC.MIB->isTailCall(Inst))
@@ -224,7 +235,7 @@ InliningInfo getInliningInfo(const BinaryFunction &BF) {
 void Inliner::findInliningCandidates(BinaryContext &BC) {
   for (const auto &BFI : BC.getBinaryFunctions()) {
     const BinaryFunction &Function = BFI.second;
-    if (!shouldOptimize(Function))
+    if (!shouldOptimize(Function) || opts::mustSkip(Function))
       continue;
     const InliningInfo InlInfo = getInliningInfo(Function);
     if (InlInfo.Type != INL_NONE)
@@ -250,7 +261,8 @@ Inliner::inlineCall(BinaryBasicBlock &CallerBB,
   const bool CSIsInvoke = BC.MIB->isInvoke(*CallInst);
   const bool CSIsTailCall = BC.MIB->isTailCall(*CallInst);
   const int64_t CSGNUArgsSize = BC.MIB->getGnuArgsSize(*CallInst);
-  const Optional<MCPlus::MCLandingPad> CSEHInfo = BC.MIB->getEHInfo(*CallInst);
+  const std::optional<MCPlus::MCLandingPad> CSEHInfo =
+      BC.MIB->getEHInfo(*CallInst);
 
   // Split basic block at the call site if there will be more incoming edges
   // coming from the callee.
@@ -288,12 +300,12 @@ Inliner::inlineCall(BinaryBasicBlock &CallerBB,
   // Copy basic blocks and maintain a map from their origin.
   std::unordered_map<const BinaryBasicBlock *, BinaryBasicBlock *> InlinedBBMap;
   InlinedBBMap[&Callee.front()] = FirstInlinedBB;
-  for (auto BBI = std::next(Callee.begin()); BBI != Callee.end(); ++BBI) {
+  for (const BinaryBasicBlock &BB : llvm::drop_begin(Callee)) {
     BinaryBasicBlock *InlinedBB = CallerFunction.addBasicBlock();
-    InlinedBBMap[&*BBI] = InlinedBB;
+    InlinedBBMap[&BB] = InlinedBB;
     InlinedBB->setCFIState(FirstInlinedBB->getCFIState());
     if (Callee.hasValidProfile())
-      InlinedBB->setExecutionCount(BBI->getKnownExecutionCount());
+      InlinedBB->setExecutionCount(BB.getKnownExecutionCount());
     else
       InlinedBB->setExecutionCount(FirstInlinedBBCount);
   }
@@ -310,13 +322,13 @@ Inliner::inlineCall(BinaryBasicBlock &CallerBB,
       if (MIB.isPseudo(Inst))
         continue;
 
-      MIB.stripAnnotations(Inst, /*KeepTC=*/BC.isX86());
+      MIB.stripAnnotations(Inst, /*KeepTC=*/BC.isX86() || BC.isAArch64());
 
       // Fix branch target. Strictly speaking, we don't have to do this as
       // targets of direct branches will be fixed later and don't matter
       // in the CFG state. However, disassembly may look misleading, and
       // hence we do the fixing.
-      if (MIB.isBranch(Inst)) {
+      if (MIB.isBranch(Inst) && !MIB.isTailCall(Inst)) {
         assert(!MIB.isIndirectBranch(Inst) &&
                "unexpected indirect branch in callee");
         const BinaryBasicBlock *TargetBB =
@@ -355,7 +367,9 @@ Inliner::inlineCall(BinaryBasicBlock &CallerBB,
     std::vector<BinaryBasicBlock *> Successors(BB.succ_size());
     llvm::transform(BB.successors(), Successors.begin(),
                     [&InlinedBBMap](const BinaryBasicBlock *BB) {
-                      return InlinedBBMap.at(BB);
+                      auto It = InlinedBBMap.find(BB);
+                      assert(It != InlinedBBMap.end());
+                      return It->second;
                     });
 
     if (CallerFunction.hasValidProfile() && Callee.hasValidProfile())
@@ -395,8 +409,8 @@ Inliner::inlineCall(BinaryBasicBlock &CallerBB,
 
 bool Inliner::inlineCallsInFunction(BinaryFunction &Function) {
   BinaryContext &BC = Function.getBinaryContext();
-  std::vector<BinaryBasicBlock *> Blocks(Function.layout().begin(),
-                                         Function.layout().end());
+  std::vector<BinaryBasicBlock *> Blocks(Function.getLayout().block_begin(),
+                                         Function.getLayout().block_end());
   llvm::sort(
       Blocks, [](const BinaryBasicBlock *BB1, const BinaryBasicBlock *BB2) {
         return BB1->getKnownExecutionCount() > BB2->getKnownExecutionCount();
@@ -495,11 +509,11 @@ bool Inliner::inlineCallsInFunction(BinaryFunction &Function) {
   return DidInlining;
 }
 
-void Inliner::runOnFunctions(BinaryContext &BC) {
+Error Inliner::runOnFunctions(BinaryContext &BC) {
   opts::syncOptions();
 
   if (!opts::inliningEnabled())
-    return;
+    return Error::success();
 
   bool InlinedOnce;
   unsigned NumIters = 0;
@@ -539,10 +553,11 @@ void Inliner::runOnFunctions(BinaryContext &BC) {
   } while (InlinedOnce && NumIters < opts::InlineMaxIters);
 
   if (NumInlinedCallSites)
-    outs() << "BOLT-INFO: inlined " << NumInlinedDynamicCalls << " calls at "
-           << NumInlinedCallSites << " call sites in " << NumIters
-           << " iteration(s). Change in binary size: " << TotalInlinedBytes
-           << " bytes.\n";
+    BC.outs() << "BOLT-INFO: inlined " << NumInlinedDynamicCalls << " calls at "
+              << NumInlinedCallSites << " call sites in " << NumIters
+              << " iteration(s). Change in binary size: " << TotalInlinedBytes
+              << " bytes.\n";
+  return Error::success();
 }
 
 } // namespace bolt

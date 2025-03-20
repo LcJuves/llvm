@@ -7,10 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03, c++11, c++14, c++17
-// UNSUPPORTED: libcpp-has-no-incomplete-ranges
-
-// clang-cl and cl currently don't support [[no_unique_address]]
-// XFAIL: msvc
 
 // class lazy_split_view {
 //   _LIBCPP_NO_UNIQUE_ADDRESS _View __base_ = _View();
@@ -55,7 +51,7 @@ namespace test2 {
     int x;
     int* begin() const;
     int* end() const;
-    constexpr static size_t size() { return 1; }
+    constexpr static std::size_t size() { return 1; }
   };
   static_assert( std::ranges::forward_range<TinyView>);
   static_assert( std::ranges::__tiny_range<TinyView>);
@@ -108,7 +104,7 @@ namespace test4 {
   struct EmptyTinyView : std::ranges::view_base {
     int* begin() const;
     int* end() const;
-    constexpr static size_t size() { return 1; }
+    constexpr static std::size_t size() { return 1; }
   };
   static_assert( std::ranges::forward_range<EmptyTinyView>);
   static_assert( std::ranges::__tiny_range<EmptyTinyView>);

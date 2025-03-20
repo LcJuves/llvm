@@ -1,4 +1,4 @@
-! RUN: bbc %s -o - | FileCheck %s
+! RUN: bbc %s -o - | FileCheck %s --check-prefixes=CHECK,%if flang-supports-f128-math %{F128%} %else %{F64%}
 
 ! CHECK-LABEL: sign_testi
 subroutine sign_testi(a, b, c)
@@ -16,14 +16,16 @@ end subroutine
 subroutine sign_testr(a, b, c)
   real a, b, c
   ! CHECK-NOT: fir.call @{{.*}}fabs
-  ! CHECK: fir.call @{{.*}}copysign{{.*}} : (f32, f32) -> f32
+  ! CHECK: math.copysign{{.*}} : f32
   c = sign(a, b)
 end subroutine
 
 ! CHECK-LABEL: sign_testr2
 subroutine sign_testr2(a, b, c)
-  real(KIND=16) a, b, c
+  integer, parameter :: rk = merge(16, 8, selected_real_kind(33, 4931)==16)
+  real(KIND=rk) a, b, c
   ! CHECK-NOT: fir.call @{{.*}}fabs
-  ! CHECK: fir.call @{{.*}}copysign{{.*}} : (f128, f128) -> f128
+  ! F128: math.copysign{{.*}} : f128
+  ! F64: math.copysign{{.*}} : f64
   c = sign(a, b)
 end subroutine

@@ -893,8 +893,8 @@ define <16 x i8> @merge_16i8_i8_01u3456789ABCDuF(ptr %ptr) nounwind uwtable noin
 ; X86-SSE1-NEXT:    movl 3(%ecx), %esi
 ; X86-SSE1-NEXT:    movl 7(%ecx), %edi
 ; X86-SSE1-NEXT:    movzwl 11(%ecx), %ebx
-; X86-SSE1-NEXT:    movb 13(%ecx), %dl
-; X86-SSE1-NEXT:    movb 15(%ecx), %cl
+; X86-SSE1-NEXT:    movzbl 13(%ecx), %edx
+; X86-SSE1-NEXT:    movzbl 15(%ecx), %ecx
 ; X86-SSE1-NEXT:    movb %dl, 13(%eax)
 ; X86-SSE1-NEXT:    movb %cl, 15(%eax)
 ; X86-SSE1-NEXT:    movw %bx, 11(%eax)
@@ -976,7 +976,7 @@ define <16 x i8> @merge_16i8_i8_01u3uuzzuuuuuzzz(ptr %ptr) nounwind uwtable noin
 ; X86-SSE1-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X86-SSE1-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; X86-SSE1-NEXT:    movzwl (%ecx), %edx
-; X86-SSE1-NEXT:    movb 3(%ecx), %cl
+; X86-SSE1-NEXT:    movzbl 3(%ecx), %ecx
 ; X86-SSE1-NEXT:    movb %cl, 3(%eax)
 ; X86-SSE1-NEXT:    movw %dx, (%eax)
 ; X86-SSE1-NEXT:    movb $0, 15(%eax)
@@ -1074,7 +1074,7 @@ define void @merge_4i32_i32_combine(ptr %dst, ptr %src) {
 ; X86-SSE1-NEXT:    movl {{[0-9]+}}(%esp), %eax
 ; X86-SSE1-NEXT:    movl {{[0-9]+}}(%esp), %ecx
 ; X86-SSE1-NEXT:    movss {{.*#+}} xmm0 = mem[0],zero,zero,zero
-; X86-SSE1-NEXT:    movss {{.*#+}} xmm1 = mem[0],zero,zero,zero
+; X86-SSE1-NEXT:    movss {{.*#+}} xmm1 = [NaN,0.0E+0,0.0E+0,0.0E+0]
 ; X86-SSE1-NEXT:    andps %xmm0, %xmm1
 ; X86-SSE1-NEXT:    movaps %xmm1, (%eax)
 ; X86-SSE1-NEXT:    retl

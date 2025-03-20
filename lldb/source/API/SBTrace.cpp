@@ -36,26 +36,70 @@ SBTrace SBTrace::LoadTraceFromFile(SBError &error, SBDebugger &debugger,
       debugger.ref(), trace_description_file.ref());
 
   if (!trace_or_err) {
-    error.SetErrorString(toString(trace_or_err.takeError()).c_str());
+    error = Status::FromErrorString(toString(trace_or_err.takeError()).c_str());
     return SBTrace();
   }
 
   return SBTrace(trace_or_err.get());
 }
 
+SBTraceCursor SBTrace::CreateNewCursor(SBError &error, SBThread &thread) {
+  LLDB_INSTRUMENT_VA(this, error, thread);
+
+  if (!m_opaque_sp) {
+    error = Status::FromErrorString("error: invalid trace");
+    return SBTraceCursor();
+  }
+  if (!thread.get()) {
+    error = Status::FromErrorString("error: invalid thread");
+    return SBTraceCursor();
+  }
+
+  if (llvm::Expected<lldb::TraceCursorSP> trace_cursor_sp =
+          m_opaque_sp->CreateNewCursor(*thread.get())) {
+    return SBTraceCursor(std::move(*trace_cursor_sp));
+  } else {
+    error = Status::FromErrorString(
+        llvm::toString(trace_cursor_sp.takeError()).c_str());
+    return SBTraceCursor();
+  }
+}
+
+SBFileSpec SBTrace::SaveToDisk(SBError &error, const SBFileSpec &bundle_dir,
+                               bool compact) {
+  LLDB_INSTRUMENT_VA(this, error, bundle_dir, compact);
+
+  error.Clear();
+  SBFileSpec file_spec;
+
+  if (!m_opaque_sp)
+    error = Status::FromErrorString("error: invalid trace");
+  else if (Expected<FileSpec> desc_file =
+               m_opaque_sp->SaveToDisk(bundle_dir.ref(), compact))
+    file_spec.SetFileSpec(*desc_file);
+  else
+    error =
+        Status::FromErrorString(llvm::toString(desc_file.takeError()).c_str());
+
+  return file_spec;
+}
+
 const char *SBTrace::GetStartConfigurationHelp() {
   LLDB_INSTRUMENT_VA(this);
-  return m_opaque_sp ? m_opaque_sp->GetStartConfigurationHelp() : nullptr;
+  if (!m_opaque_sp)
+    return nullptr;
+
+  return ConstString(m_opaque_sp->GetStartConfigurationHelp()).GetCString();
 }
 
 SBError SBTrace::Start(const SBStructuredData &configuration) {
   LLDB_INSTRUMENT_VA(this, configuration);
   SBError error;
   if (!m_opaque_sp)
-    error.SetErrorString("error: invalid trace");
+    error = Status::FromErrorString("error: invalid trace");
   else if (llvm::Error err =
                m_opaque_sp->Start(configuration.m_impl_up->GetObjectSP()))
-    error.SetErrorString(llvm::toString(std::move(err)).c_str());
+    error = Status::FromErrorString(llvm::toString(std::move(err)).c_str());
   return error;
 }
 
@@ -65,12 +109,12 @@ SBError SBTrace::Start(const SBThread &thread,
 
   SBError error;
   if (!m_opaque_sp)
-    error.SetErrorString("error: invalid trace");
+    error = Status::FromErrorString("error: invalid trace");
   else {
     if (llvm::Error err =
             m_opaque_sp->Start(std::vector<lldb::tid_t>{thread.GetThreadID()},
                                configuration.m_impl_up->GetObjectSP()))
-      error.SetErrorString(llvm::toString(std::move(err)).c_str());
+      error = Status::FromErrorString(llvm::toString(std::move(err)).c_str());
   }
 
   return error;
@@ -80,9 +124,9 @@ SBError SBTrace::Stop() {
   LLDB_INSTRUMENT_VA(this);
   SBError error;
   if (!m_opaque_sp)
-    error.SetErrorString("error: invalid trace");
+    error = Status::FromErrorString("error: invalid trace");
   else if (llvm::Error err = m_opaque_sp->Stop())
-    error.SetErrorString(llvm::toString(std::move(err)).c_str());
+    error = Status::FromErrorString(llvm::toString(std::move(err)).c_str());
   return error;
 }
 
@@ -90,9 +134,9 @@ SBError SBTrace::Stop(const SBThread &thread) {
   LLDB_INSTRUMENT_VA(this, thread);
   SBError error;
   if (!m_opaque_sp)
-    error.SetErrorString("error: invalid trace");
+    error = Status::FromErrorString("error: invalid trace");
   else if (llvm::Error err = m_opaque_sp->Stop({thread.GetThreadID()}))
-    error.SetErrorString(llvm::toString(std::move(err)).c_str());
+    error = Status::FromErrorString(llvm::toString(std::move(err)).c_str());
   return error;
 }
 

@@ -12,7 +12,6 @@
 #include "MCTargetDesc/HexagonMCTargetDesc.h"
 #include "TargetInfo/HexagonTargetInfo.h"
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/STLExtras.h"
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDecoderOps.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
@@ -173,7 +172,9 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeHexagonDisassembler() {
 DecodeStatus HexagonDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
                                                  ArrayRef<uint8_t> Bytes,
                                                  uint64_t Address,
-                                                 raw_ostream &cs) const {
+                                                 raw_ostream &CS) const {
+  CommentStream = &CS;
+
   DecodeStatus Result = DecodeStatus::Success;
   bool Complete = false;
   Size = 0;
@@ -185,7 +186,7 @@ DecodeStatus HexagonDisassembler::getInstruction(MCInst &MI, uint64_t &Size,
     if (Bytes.size() < HEXAGON_INSTR_SIZE)
       return MCDisassembler::Fail;
     MCInst *Inst = getContext().createMCInst();
-    Result = getSingleInstruction(*Inst, MI, Bytes, Address, cs, Complete);
+    Result = getSingleInstruction(*Inst, MI, Bytes, Address, CS, Complete);
     MI.addOperand(MCOperand::createInst(Inst));
     Size += HEXAGON_INSTR_SIZE;
     Bytes = Bytes.slice(HEXAGON_INSTR_SIZE);
@@ -428,7 +429,7 @@ DecodeStatus HexagonDisassembler::getSingleInstruction(MCInst &MI, MCInst &MCB,
                                  STI);
 
     if (Result != MCDisassembler::Success &&
-        STI.getFeatureBits()[Hexagon::ExtensionHVX])
+        STI.hasFeature(Hexagon::ExtensionHVX))
       Result = decodeInstruction(DecoderTableEXT_mmvec32, MI, Instruction,
                                  Address, this, STI);
 
@@ -499,19 +500,22 @@ DecodeStatus HexagonDisassembler::getSingleInstruction(MCInst &MI, MCInst &MCB,
     bool SubregBit = (Register & 0x1) != 0;
     if (HexagonMCInstrInfo::hasNewValue2(*MCII, Inst)) {
       // If subreg bit is set we're selecting the second produced newvalue
-      unsigned Producer = SubregBit ?
-          HexagonMCInstrInfo::getNewValueOperand(*MCII, Inst).getReg() :
-          HexagonMCInstrInfo::getNewValueOperand2(*MCII, Inst).getReg();
+      MCRegister Producer =
+          SubregBit
+              ? HexagonMCInstrInfo::getNewValueOperand(*MCII, Inst).getReg()
+              : HexagonMCInstrInfo::getNewValueOperand2(*MCII, Inst).getReg();
       assert(Producer != Hexagon::NoRegister);
       MCO.setReg(Producer);
     } else if (HexagonMCInstrInfo::hasNewValue(*MCII, Inst)) {
-      unsigned Producer =
+      MCRegister Producer =
           HexagonMCInstrInfo::getNewValueOperand(*MCII, Inst).getReg();
 
       if (HexagonMCInstrInfo::IsVecRegPair(Producer)) {
         const bool Rev = HexagonMCInstrInfo::IsReverseVecRegPair(Producer);
         const unsigned ProdPairIndex =
             Rev ? Producer - Hexagon::WR0 : Producer - Hexagon::W0;
+        if (Rev)
+          SubregBit = !SubregBit;
         Producer = (ProdPairIndex << 1) + SubregBit + Hexagon::V0;
       } else if (SubregBit)
         // Hexagon PRM 10.11 New-value operands
@@ -680,7 +684,7 @@ static DecodeStatus DecodeCtrRegsRegisterClass(MCInst &Inst, unsigned RegNo,
     /* 28 */  0,          0,          UTIMERLO,   UTIMERHI
   };
 
-  if (RegNo >= array_lengthof(CtrlRegDecoderTable))
+  if (RegNo >= std::size(CtrlRegDecoderTable))
     return MCDisassembler::Fail;
 
   static_assert(NoRegister == 0, "Expecting NoRegister to be 0");
@@ -708,7 +712,7 @@ DecodeCtrRegs64RegisterClass(MCInst &Inst, unsigned RegNo, uint64_t /*Address*/,
     /* 28 */  0,          0,          UTIMER,     0
   };
 
-  if (RegNo >= array_lengthof(CtrlReg64DecoderTable))
+  if (RegNo >= std::size(CtrlReg64DecoderTable))
     return MCDisassembler::Fail;
 
   static_assert(NoRegister == 0, "Expecting NoRegister to be 0");
@@ -807,7 +811,7 @@ static const uint16_t SysRegDecoderTable[] = {
 static DecodeStatus DecodeSysRegsRegisterClass(MCInst &Inst, unsigned RegNo,
                                                uint64_t /*Address*/,
                                                const MCDisassembler *Decoder) {
-  if (RegNo >= sizeof(SysRegDecoderTable) / sizeof(SysRegDecoderTable[0]))
+  if (RegNo >= std::size(SysRegDecoderTable))
     return MCDisassembler::Fail;
 
   if (SysRegDecoderTable[RegNo] == Hexagon::NoRegister)
@@ -835,7 +839,7 @@ static DecodeStatus
 DecodeSysRegs64RegisterClass(MCInst &Inst, unsigned RegNo, uint64_t /*Address*/,
                              const MCDisassembler *Decoder) {
   RegNo = RegNo >> 1;
-  if (RegNo >= sizeof(SysReg64DecoderTable) / sizeof(SysReg64DecoderTable[0]))
+  if (RegNo >= std::size(SysReg64DecoderTable))
     return MCDisassembler::Fail;
 
   if (SysReg64DecoderTable[RegNo] == Hexagon::NoRegister)
@@ -862,7 +866,7 @@ DecodeGuestRegsRegisterClass(MCInst &Inst, unsigned RegNo, uint64_t /*Address*/,
     /* 28 */ GPMUCNT2,  GPMUCNT3,   G30,        G31
   };
 
-  if (RegNo >= array_lengthof(GuestRegDecoderTable))
+  if (RegNo >= std::size(GuestRegDecoderTable))
     return MCDisassembler::Fail;
   if (GuestRegDecoderTable[RegNo] == Hexagon::NoRegister)
     return MCDisassembler::Fail;
@@ -889,7 +893,7 @@ DecodeGuestRegs64RegisterClass(MCInst &Inst, unsigned RegNo,
     /* 28 */ G29_28,    0,          G31_30,     0
   };
 
-  if (RegNo >= array_lengthof(GuestReg64DecoderTable))
+  if (RegNo >= std::size(GuestReg64DecoderTable))
     return MCDisassembler::Fail;
   if (GuestReg64DecoderTable[RegNo] == Hexagon::NoRegister)
     return MCDisassembler::Fail;

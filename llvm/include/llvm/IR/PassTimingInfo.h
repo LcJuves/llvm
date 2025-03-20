@@ -39,23 +39,29 @@ Timer *getPassTimer(Pass *);
 /// This class implements -time-passes functionality for new pass manager.
 /// It provides the pass-instrumentation callbacks that measure the pass
 /// execution time. They collect timing info into individual timers as
-/// passes are being run. At the end of its life-time it prints the resulting
-/// timing report.
+/// passes are being run.
 class TimePassesHandler {
   /// Value of this type is capable of uniquely identifying pass invocations.
   /// It is a pair of string Pass-Identifier (which for now is common
   /// to all the instance of a given pass) + sequential invocation counter.
   using PassInvocationID = std::pair<StringRef, unsigned>;
 
-  /// A group of all pass-timing timers.
-  TimerGroup TG;
+  /// Groups of timers for passes and analyses.
+  TimerGroup &PassTG =
+      NamedRegionTimer::getNamedTimerGroup(PassGroupName, PassGroupDesc);
+  TimerGroup &AnalysisTG = NamedRegionTimer::getNamedTimerGroup(
+      AnalysisGroupName, AnalysisGroupDesc);
 
   using TimerVector = llvm::SmallVector<std::unique_ptr<Timer>, 4>;
   /// Map of timers for pass invocations
   StringMap<TimerVector> TimingData;
 
-  /// Stack of currently active timers.
-  SmallVector<Timer *, 8> TimerStack;
+  /// Stack of currently active pass timers. Passes can run other
+  /// passes.
+  SmallVector<Timer *, 8> PassActiveTimerStack;
+  /// Stack of currently active analysis timers. Analyses can request other
+  /// analyses.
+  SmallVector<Timer *, 8> AnalysisActiveTimerStack;
 
   /// Custom output stream to print timing information into.
   /// By default (== nullptr) we emit time report into the stream created by
@@ -66,11 +72,14 @@ class TimePassesHandler {
   bool PerRun;
 
 public:
+  static constexpr StringRef PassGroupName = "pass";
+  static constexpr StringRef AnalysisGroupName = "analysis";
+  static constexpr StringRef PassGroupDesc = "Pass execution timing report";
+  static constexpr StringRef AnalysisGroupDesc =
+      "Analysis execution timing report";
+
   TimePassesHandler();
   TimePassesHandler(bool Enabled, bool PerRun = false);
-
-  /// Destructor handles the print action if it has not been handled before.
-  ~TimePassesHandler() { print(); }
 
   /// Prints out timing information and then resets the timers.
   void print();
@@ -89,14 +98,12 @@ private:
   LLVM_DUMP_METHOD void dump() const;
 
   /// Returns the new timer for each new run of the pass.
-  Timer &getPassTimer(StringRef PassID);
+  Timer &getPassTimer(StringRef PassID, bool IsPass);
 
-  void startTimer(StringRef PassID);
-  void stopTimer(StringRef PassID);
-
-  // Implementation of pass instrumentation callbacks.
-  void runBeforePass(StringRef PassID);
-  void runAfterPass(StringRef PassID);
+  void startAnalysisTimer(StringRef PassID);
+  void stopAnalysisTimer(StringRef PassID);
+  void startPassTimer(StringRef PassID);
+  void stopPassTimer(StringRef PassID);
 };
 
 } // namespace llvm

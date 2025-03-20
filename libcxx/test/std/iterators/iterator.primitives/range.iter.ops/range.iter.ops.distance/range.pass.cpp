@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03, c++11, c++14, c++17
-// UNSUPPORTED: libcpp-has-no-incomplete-ranges
 
 // template<range R>
 //   constexpr range_difference_t<R> ranges::distance(R&& r);
@@ -52,9 +51,14 @@ constexpr bool test() {
     using R = std::ranges::subrange<It, Sent, std::ranges::subrange_kind::unsized>;
 
     int a[] = {1, 2, 3};
-    auto r = R(It(a), Sent(It(a + 3)));
-    assert(std::ranges::distance(r) == 3);
-    assert(std::ranges::distance(static_cast<R&&>(r)) == 3);
+    {
+      auto r = R(It(a), Sent(It(a + 3)));
+      assert(std::ranges::distance(r) == 3);
+    }
+    {
+      auto r = R(It(a), Sent(It(a + 3)));
+      assert(std::ranges::distance(static_cast<R&&>(r)) == 3);
+    }
     static_assert(!std::is_invocable_v<decltype(std::ranges::distance), const R&>);
     static_assert(!std::is_invocable_v<decltype(std::ranges::distance), const R&&>);
   }
@@ -65,9 +69,14 @@ constexpr bool test() {
     using R = std::ranges::subrange<It, Sent, std::ranges::subrange_kind::sized>;
 
     int a[] = {1, 2, 3};
-    auto r = R(It(a), Sent(It(a + 3)), 3);
-    assert(std::ranges::distance(r) == 3);
-    assert(std::ranges::distance(static_cast<R&&>(r)) == 3);
+    {
+      auto r = R(It(a), Sent(It(a + 3)), 3);
+      assert(std::ranges::distance(r) == 3);
+    }
+    {
+      auto r = R(It(a), Sent(It(a + 3)), 3);
+      assert(std::ranges::distance(static_cast<R&&>(r)) == 3);
+    }
     static_assert(!std::is_invocable_v<decltype(std::ranges::distance), const R&>);
     static_assert(!std::is_invocable_v<decltype(std::ranges::distance), const R&&>);
   }

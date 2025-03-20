@@ -15,6 +15,7 @@ add_mlir_conversion_library(MLIRAMDGPUToROCDL
   MLIRLLVMDialect
   MLIRROCDLDialect
   MLIRAMDGPUDialect
+  MLIRAMDGPUUtils
   MLIRPass
   MLIRTransforms
   )

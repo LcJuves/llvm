@@ -21,6 +21,7 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/InlineCost.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 #include <functional>
@@ -33,7 +34,6 @@ class AAResults;
 class AllocaInst;
 class BasicBlock;
 class BlockFrequencyInfo;
-class CallGraph;
 class DebugInfoFinder;
 class DominatorTree;
 class Function;
@@ -41,6 +41,7 @@ class Instruction;
 class Loop;
 class LoopInfo;
 class Module;
+class PGOContextualProfile;
 class ProfileSummaryInfo;
 class ReturnInst;
 class DomTreeUpdater;
@@ -62,6 +63,10 @@ CloneModule(const Module &M, ValueToValueMapTy &VMap,
 struct ClonedCodeInfo {
   /// This is set to true if the cloned code contains a normal call instruction.
   bool ContainsCalls = false;
+
+  /// This is set to true if there is memprof related metadata (memprof or
+  /// callsite metadata) in the cloned code.
+  bool ContainsMemProfMetadata = false;
 
   /// This is set to true if the cloned code contains a 'dynamic' alloca.
   /// Dynamic allocas are allocas that are either not in the entry block or they
@@ -114,8 +119,7 @@ struct ClonedCodeInfo {
 /// parameter.
 BasicBlock *CloneBasicBlock(const BasicBlock *BB, ValueToValueMapTy &VMap,
                             const Twine &NameSuffix = "", Function *F = nullptr,
-                            ClonedCodeInfo *CodeInfo = nullptr,
-                            DebugInfoFinder *DIFinder = nullptr);
+                            ClonedCodeInfo *CodeInfo = nullptr);
 
 /// Return a copy of the specified function and add it to that
 /// function's module.  Also, any references specified in the VMap are changed
@@ -170,6 +174,38 @@ void CloneFunctionInto(Function *NewFunc, const Function *OldFunc,
                        ValueMapTypeRemapper *TypeMapper = nullptr,
                        ValueMaterializer *Materializer = nullptr);
 
+/// Clone OldFunc's attributes into NewFunc, transforming values based on the
+/// mappings in VMap.
+void CloneFunctionAttributesInto(Function *NewFunc, const Function *OldFunc,
+                                 ValueToValueMapTy &VMap,
+                                 bool ModuleLevelChanges,
+                                 ValueMapTypeRemapper *TypeMapper = nullptr,
+                                 ValueMaterializer *Materializer = nullptr);
+
+/// Clone OldFunc's metadata into NewFunc.
+///
+/// The caller is expected to populate \p VMap beforehand and set an appropriate
+/// \p RemapFlag. Subprograms/CUs/types that were already mapped to themselves
+/// won't be duplicated.
+///
+/// NOTE: This function doesn't clone !llvm.dbg.cu when cloning into a different
+/// module. Use CloneFunctionInto for that behavior.
+void CloneFunctionMetadataInto(Function &NewFunc, const Function &OldFunc,
+                               ValueToValueMapTy &VMap, RemapFlags RemapFlag,
+                               ValueMapTypeRemapper *TypeMapper = nullptr,
+                               ValueMaterializer *Materializer = nullptr,
+                               const MetadataPredicate *IdentityMD = nullptr);
+
+/// Clone OldFunc's body into NewFunc.
+void CloneFunctionBodyInto(Function &NewFunc, const Function &OldFunc,
+                           ValueToValueMapTy &VMap, RemapFlags RemapFlag,
+                           SmallVectorImpl<ReturnInst *> &Returns,
+                           const char *NameSuffix = "",
+                           ClonedCodeInfo *CodeInfo = nullptr,
+                           ValueMapTypeRemapper *TypeMapper = nullptr,
+                           ValueMaterializer *Materializer = nullptr,
+                           const MetadataPredicate *IdentityMD = nullptr);
+
 void CloneAndPruneIntoFromInst(Function *NewFunc, const Function *OldFunc,
                                const Instruction *StartingInst,
                                ValueToValueMapTy &VMap, bool ModuleLevelChanges,
@@ -199,18 +235,15 @@ void CloneAndPruneFunctionInto(Function *NewFunc, const Function *OldFunc,
 class InlineFunctionInfo {
 public:
   explicit InlineFunctionInfo(
-      CallGraph *cg = nullptr,
       function_ref<AssumptionCache &(Function &)> GetAssumptionCache = nullptr,
       ProfileSummaryInfo *PSI = nullptr,
       BlockFrequencyInfo *CallerBFI = nullptr,
       BlockFrequencyInfo *CalleeBFI = nullptr, bool UpdateProfile = true)
-      : CG(cg), GetAssumptionCache(GetAssumptionCache), PSI(PSI),
-        CallerBFI(CallerBFI), CalleeBFI(CalleeBFI),
-        UpdateProfile(UpdateProfile) {}
+      : GetAssumptionCache(GetAssumptionCache), PSI(PSI), CallerBFI(CallerBFI),
+        CalleeBFI(CalleeBFI), UpdateProfile(UpdateProfile) {}
 
   /// If non-null, InlineFunction will update the callgraph to reflect the
   /// changes it makes.
-  CallGraph *CG;
   function_ref<AssumptionCache &(Function &)> GetAssumptionCache;
   ProfileSummaryInfo *PSI;
   BlockFrequencyInfo *CallerBFI, *CalleeBFI;
@@ -260,7 +293,22 @@ public:
 /// and all varargs at the callsite will be passed to any calls to
 /// ForwardVarArgsTo. The caller of InlineFunction has to make sure any varargs
 /// are only used by ForwardVarArgsTo.
+///
+/// The callee's function attributes are merged into the callers' if
+/// MergeAttributes is set to true.
 InlineResult InlineFunction(CallBase &CB, InlineFunctionInfo &IFI,
+                            bool MergeAttributes = false,
+                            AAResults *CalleeAAR = nullptr,
+                            bool InsertLifetime = true,
+                            Function *ForwardVarArgsTo = nullptr);
+
+/// Same as above, but it will update the contextual profile. If the contextual
+/// profile is invalid (i.e. not loaded because it is not present), it defaults
+/// to the behavior of the non-contextual profile updating variant above. This
+/// makes it easy to drop-in replace uses of the non-contextual overload.
+InlineResult InlineFunction(CallBase &CB, InlineFunctionInfo &IFI,
+                            PGOContextualProfile &CtxProf,
+                            bool MergeAttributes = false,
                             AAResults *CalleeAAR = nullptr,
                             bool InsertLifetime = true,
                             Function *ForwardVarArgsTo = nullptr);
@@ -278,7 +326,7 @@ Loop *cloneLoopWithPreheader(BasicBlock *Before, BasicBlock *LoopDomBB,
                              SmallVectorImpl<BasicBlock *> &Blocks);
 
 /// Remaps instructions in \p Blocks using the mapping in \p VMap.
-void remapInstructionsInBlocks(const SmallVectorImpl<BasicBlock *> &Blocks,
+void remapInstructionsInBlocks(ArrayRef<BasicBlock *> Blocks,
                                ValueToValueMapTy &VMap);
 
 /// Split edge between BB and PredBB and duplicate all non-Phi instructions

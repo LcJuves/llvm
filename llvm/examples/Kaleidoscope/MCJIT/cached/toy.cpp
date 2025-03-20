@@ -31,15 +31,15 @@ using namespace llvm;
 // Command-line options
 //===----------------------------------------------------------------------===//
 
-cl::opt<std::string>
-InputIR("input-IR",
-        cl::desc("Specify the name of an IR file to load for function definitions"),
-        cl::value_desc("input IR file name"));
+static cl::opt<std::string> InputIR(
+    "input-IR",
+    cl::desc("Specify the name of an IR file to load for function definitions"),
+    cl::value_desc("input IR file name"));
 
-cl::opt<bool>
-UseObjectCache("use-object-cache",
-               cl::desc("Enable use of the MCJIT object caching"),
-               cl::init(false));
+static cl::opt<bool>
+    UseObjectCache("use-object-cache",
+                   cl::desc("Enable use of the MCJIT object caching"),
+                   cl::init(false));
 
 //===----------------------------------------------------------------------===//
 // Lexer
@@ -1127,7 +1127,7 @@ Value *IfExprAST::Codegen() {
   ThenBB = Builder.GetInsertBlock();
 
   // Emit else block.
-  TheFunction->getBasicBlockList().push_back(ElseBB);
+  TheFunction->insert(TheFunction->end(), ElseBB);
   Builder.SetInsertPoint(ElseBB);
 
   Value *ElseV = Else->Codegen();
@@ -1138,7 +1138,7 @@ Value *IfExprAST::Codegen() {
   ElseBB = Builder.GetInsertBlock();
 
   // Emit merge block.
-  TheFunction->getBasicBlockList().push_back(MergeBB);
+  TheFunction->insert(TheFunction->end(), MergeBB);
   Builder.SetInsertPoint(MergeBB);
   PHINode *PN = Builder.CreatePHI(Type::getDoubleTy(TheContext), 2, "iftmp");
 

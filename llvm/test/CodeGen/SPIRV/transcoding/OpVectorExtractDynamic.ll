@@ -1,5 +1,8 @@
 ; RUN: llc -O0 -mtriple=spirv32-unknown-unknown %s -o - | FileCheck %s --check-prefix=CHECK-SPIRV
 
+; TODO: This test currently fails with LLVM_ENABLE_EXPENSIVE_CHECKS enabled
+; XFAIL: expensive_checks
+
 ; CHECK-SPIRV: OpName %[[#vec:]] "vec"
 ; CHECK-SPIRV: OpName %[[#index:]] "index"
 ; CHECK-SPIRV: OpName %[[#res:]] "res"
@@ -9,7 +12,6 @@
 
 ; CHECK-SPIRV: %[[#res]] = OpVectorExtractDynamic %[[#float]] %[[#vec]] %[[#index]]
 
-; Function Attrs: nounwind
 define spir_kernel void @test(float addrspace(1)* nocapture %out, <2 x float> %vec, i32 %index) {
 entry:
   %res = extractelement <2 x float> %vec, i32 %index

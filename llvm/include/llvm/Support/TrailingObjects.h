@@ -37,7 +37,7 @@
 /// determine the size needed for allocation via
 /// 'additionalSizeToAlloc' and 'totalSizeToAlloc'.
 ///
-/// All the methods implemented by this class are are intended for use
+/// All the methods implemented by this class are intended for use
 /// by the implementation of the class, not as part of its interface
 /// (thus, private inheritance is suggested).
 ///
@@ -46,7 +46,6 @@
 #ifndef LLVM_SUPPORT_TRAILINGOBJECTS_H
 #define LLVM_SUPPORT_TRAILINGOBJECTS_H
 
-#include "llvm/Support/AlignOf.h"
 #include "llvm/Support/Alignment.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/MathExtras.h"
@@ -310,7 +309,7 @@ public:
   /// that it's clear what the counts are counting in callers.
   template <typename... Tys>
   static constexpr std::enable_if_t<
-      std::is_same<Foo<TrailingTys...>, Foo<Tys...>>::value, size_t>
+      std::is_same_v<Foo<TrailingTys...>, Foo<Tys...>>, size_t>
   additionalSizeToAlloc(typename trailing_objects_internal::ExtractSecondType<
                         TrailingTys, size_t>::type... Counts) {
     return ParentType::additionalSizeToAllocImpl(0, Counts...);
@@ -322,7 +321,7 @@ public:
   /// object.
   template <typename... Tys>
   static constexpr std::enable_if_t<
-      std::is_same<Foo<TrailingTys...>, Foo<Tys...>>::value, size_t>
+      std::is_same_v<Foo<TrailingTys...>, Foo<Tys...>>, size_t>
   totalSizeToAlloc(typename trailing_objects_internal::ExtractSecondType<
                    TrailingTys, size_t>::type... Counts) {
     return sizeof(BaseTy) + ParentType::additionalSizeToAllocImpl(0, Counts...);

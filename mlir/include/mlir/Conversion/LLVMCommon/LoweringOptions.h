@@ -35,7 +35,7 @@ public:
   bool useBarePtrCallConv = false;
 
   enum class AllocLowering {
-    /// Use malloc for for heap allocations.
+    /// Use malloc for heap allocations.
     Malloc,
 
     /// Use aligned_alloc for heap allocations.
@@ -47,6 +47,8 @@ public:
   };
 
   AllocLowering allocLowering = AllocLowering::Malloc;
+
+  bool useGenericFunctions = false;
 
   /// The data layout of the module to produce. This must be consistent with the
   /// data layout used in the upper levels of the lowering pipeline.

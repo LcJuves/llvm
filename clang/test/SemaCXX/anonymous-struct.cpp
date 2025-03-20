@@ -29,14 +29,13 @@ struct E {
 
 template <class T> void foo(T);
 typedef struct { // expected-error {{anonymous non-C-compatible type given name for linkage purposes by typedef declaration after its linkage was computed; add a tag name here to establish linkage prior to definition}}
-#if __cplusplus <= 199711L
-// expected-note@-2 {{declared here}}
-#endif
+// expected-note@-1 {{unnamed type used in template argument was declared here}}
 
   void test() { // expected-note {{type is not C-compatible due to this member declaration}}
     foo(this);
 #if __cplusplus <= 199711L
     // expected-warning@-2 {{template argument uses unnamed type}}
+    // expected-note@-3 {{while substituting deduced template arguments}}
 #endif
   }
 } A; // expected-note {{type is given name 'A' for linkage purposes by this typedef declaration}}
@@ -133,6 +132,7 @@ namespace ValidButUnsupported {
     int arr[&f<X> ? 1 : 2];
 #if __cplusplus < 201103L
     // expected-warning@-2 {{folded to constant}}
+    // expected-warning@-3 {{variable length arrays in C++ are a Clang extension}}
 #endif
   } C; // expected-note {{by this typedef}}
 }
@@ -189,3 +189,20 @@ typedef struct { // expected-warning {{anonymous non-C-compatible type}}
   }
 } A; // expected-note {{given name 'A' for linkage purposes by this typedef}}
 }
+
+#if __cplusplus > 201103L
+namespace GH58800 {
+struct A {
+  union {
+    struct {
+      float red = 0.0f;
+    };
+  };
+};
+
+A GetA() {
+  A result{};
+  return result;
+}
+}
+#endif

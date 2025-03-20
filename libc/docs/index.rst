@@ -1,20 +1,26 @@
-===============================================
-llvm-libc: An ISO C-conformant Standard Library
-===============================================
+==================
+The LLVM C Library
+==================
 
-**llvm-libc library is not complete.  If you need a fully functioning libc right
-now, you should continue to use your standard system libc.**
+.. warning::
+  LLVM-libc is not yet ABI stable; currently only static linking is supported.
+  LLVM-libc developers retain the right to modify the ABI of types used
+  throughout the library. Another libc should be preferred if ABI stability is
+  a requirement.
 
-.. contents:: Table of Contents
-  :depth: 4
-  :local:
+.. note::
+  LLVM-libc is not fully complete right now. Some programs may fail to build due
+  to missing functions. If you would like to help us finish LLVM-libc, check
+  out "`Contributing to the libc project <contributing.html>`__" in the sidebar
+  or ask on `discord <https://discord.com/channels/636084430946959380/636732994891284500>`__
+  (`invite link <https://discord.gg/xS7Z362>`__).
 
 Introduction
 ============
 
-The libc aspires to a unique place in the software ecosystem.  The goals are:
+LLVM-libc aspires to a unique place in the software ecosystem.  The goals are:
 
-- Fully compliant with current C standards (C17 and upcoming C2x) and POSIX.
+- Fully compliant with current C23 and POSIX.1-2024 standards.
 - Easily decomposed and embedded: Supplement or replace system C library
   functionality easily.  This is useful to get consistent math precision across
   systems, or updated memory operations for newer microarchitectures.  These
@@ -28,42 +34,57 @@ The libc aspires to a unique place in the software ecosystem.  The goals are:
   libc functions.
 - A complete testsuite that tests both the public interface and internal
   algorithms.
-- `Fuzzing`__
+- `Fuzzing <https://github.com/llvm/llvm-project/tree/main/libc/fuzzing>`__
 
-.. __: https://github.com/llvm/llvm-project/tree/main/libc/fuzzing
-
-Platform Support
-================
-
-Most development is currently targeting x86_64 and aarch64 on Linux.  Several
-functions in llvm-libc have been tested on Windows.  The Fuchsia platform is
-slowly replacing functions from its bundled libc with functions from llvm-libc.
-
-ABI Compatibility
-=================
-
-llvm-libc is written to be ABI independent.  Interfaces are generated using
-LLVM's tablegen, so supporting arbitrary ABIs is possible.  In it's initial
-stages llvm-libc is not offering ABI stability in any form.
-
-Other Interesting Documentation
-===============================
 
 .. toctree::
+   :hidden:
+   :maxdepth: 1
+   :caption: Status & Support
 
-    build_system
-    clang_tidy_checks
-    entrypoints
-    fuzzing
-    ground_truth_specification
-    header_generation
-    implementation_standard
-    api_test
-    layering
-    mechanics_of_public_api
-    redirectors
-    source_layout
-    strings
-    runtimes_build
-    stdio
-    math
+   headers/index.rst
+   arch_support
+   platform_support
+   compiler_support
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+   :caption: Simple Usage
+
+   getting_started
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+   :caption: Advanced Usage
+
+   full_host_build
+   full_cross_build
+   overlay_mode
+   gpu/index.rst
+   uefi/index.rst
+   configure
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+   :caption: Development
+
+   build_and_test
+   dev/index.rst
+   porting
+   contributing
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+   :caption: Useful Links
+
+   talks
+   Source Code <https://github.com/llvm/llvm-project/tree/main/libc>
+   Bug Reports <https://github.com/llvm/llvm-project/labels/libc>
+   Discourse <https://discourse.llvm.org/c/runtimes/libc>
+   Join the Discord <https://discord.gg/xS7Z362>
+   Discord Channel <https://discord.com/channels/636084430946959380/636732994891284500>
+   Buildbot <https://lab.llvm.org/buildbot/#/builders?tags=libc>

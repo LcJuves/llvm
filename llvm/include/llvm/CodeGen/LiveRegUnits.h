@@ -43,7 +43,7 @@ public:
   /// For a machine instruction \p MI, adds all register units used in
   /// \p UsedRegUnits and defined or clobbered in \p ModifiedRegUnits. This is
   /// useful when walking over a range of instructions to track registers
-  /// used or defined seperately.
+  /// used or defined separately.
   static void accumulateUsedDefed(const MachineInstr &MI,
                                   LiveRegUnits &ModifiedRegUnits,
                                   LiveRegUnits &UsedRegUnits,
@@ -83,25 +83,25 @@ public:
   bool empty() const { return Units.none(); }
 
   /// Adds register units covered by physical register \p Reg.
-  void addReg(MCPhysReg Reg) {
-    for (MCRegUnitIterator Unit(Reg, TRI); Unit.isValid(); ++Unit)
-      Units.set(*Unit);
+  void addReg(MCRegister Reg) {
+    for (MCRegUnit Unit : TRI->regunits(Reg))
+      Units.set(Unit);
   }
 
   /// Adds register units covered by physical register \p Reg that are
   /// part of the lanemask \p Mask.
-  void addRegMasked(MCPhysReg Reg, LaneBitmask Mask) {
+  void addRegMasked(MCRegister Reg, LaneBitmask Mask) {
     for (MCRegUnitMaskIterator Unit(Reg, TRI); Unit.isValid(); ++Unit) {
       LaneBitmask UnitMask = (*Unit).second;
-      if (UnitMask.none() || (UnitMask & Mask).any())
+      if ((UnitMask & Mask).any())
         Units.set((*Unit).first);
     }
   }
 
   /// Removes all register units covered by physical register \p Reg.
-  void removeReg(MCPhysReg Reg) {
-    for (MCRegUnitIterator Unit(Reg, TRI); Unit.isValid(); ++Unit)
-      Units.reset(*Unit);
+  void removeReg(MCRegister Reg) {
+    for (MCRegUnit Unit : TRI->regunits(Reg))
+      Units.reset(Unit);
   }
 
   /// Removes register units not preserved by the regmask \p RegMask.
@@ -113,9 +113,9 @@ public:
   void addRegsInMask(const uint32_t *RegMask);
 
   /// Returns true if no part of physical register \p Reg is live.
-  bool available(MCPhysReg Reg) const {
-    for (MCRegUnitIterator Unit(Reg, TRI); Unit.isValid(); ++Unit) {
-      if (Units.test(*Unit))
+  bool available(MCRegister Reg) const {
+    for (MCRegUnit Unit : TRI->regunits(Reg)) {
+      if (Units.test(Unit))
         return false;
     }
     return true;
@@ -161,15 +161,15 @@ private:
 
 /// Returns an iterator range over all physical register and mask operands for
 /// \p MI and bundled instructions. This also skips any debug operands.
-inline iterator_range<filter_iterator<
-    ConstMIBundleOperands, std::function<bool(const MachineOperand &)>>>
+inline iterator_range<
+    filter_iterator<ConstMIBundleOperands, bool (*)(const MachineOperand &)>>
 phys_regs_and_masks(const MachineInstr &MI) {
-  std::function<bool(const MachineOperand &)> Pred =
-      [](const MachineOperand &MOP) {
-        return MOP.isRegMask() || (MOP.isReg() && !MOP.isDebug() &&
-                                   Register::isPhysicalRegister(MOP.getReg()));
-      };
-  return make_filter_range(const_mi_bundle_ops(MI), Pred);
+  auto Pred = [](const MachineOperand &MOP) {
+    return MOP.isRegMask() ||
+           (MOP.isReg() && !MOP.isDebug() && MOP.getReg().isPhysical());
+  };
+  return make_filter_range(const_mi_bundle_ops(MI),
+                           static_cast<bool (*)(const MachineOperand &)>(Pred));
 }
 
 } // end namespace llvm

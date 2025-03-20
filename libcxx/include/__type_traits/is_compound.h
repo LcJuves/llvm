@@ -19,27 +19,27 @@
 
 _LIBCPP_BEGIN_NAMESPACE_STD
 
-#if __has_keyword(__is_compound)
+#if __has_builtin(__is_compound)
 
-template<class _Tp>
-struct _LIBCPP_TEMPLATE_VIS is_compound : _BoolConstant<__is_compound(_Tp)> { };
-
-#if _LIBCPP_STD_VER > 14
 template <class _Tp>
-inline constexpr bool is_compound_v = __is_compound(_Tp);
-#endif
+struct _LIBCPP_TEMPLATE_VIS _LIBCPP_NO_SPECIALIZATIONS is_compound : _BoolConstant<__is_compound(_Tp)> {};
 
-#else // __has_keyword(__is_compound)
+#  if _LIBCPP_STD_VER >= 17
+template <class _Tp>
+_LIBCPP_NO_SPECIALIZATIONS inline constexpr bool is_compound_v = __is_compound(_Tp);
+#  endif
 
-template <class _Tp> struct _LIBCPP_TEMPLATE_VIS is_compound
-    : public integral_constant<bool, !is_fundamental<_Tp>::value> {};
+#else // __has_builtin(__is_compound)
 
-#if _LIBCPP_STD_VER > 14
+template <class _Tp>
+struct _LIBCPP_TEMPLATE_VIS is_compound : public integral_constant<bool, !is_fundamental<_Tp>::value> {};
+
+#  if _LIBCPP_STD_VER >= 17
 template <class _Tp>
 inline constexpr bool is_compound_v = is_compound<_Tp>::value;
-#endif
+#  endif
 
-#endif // __has_keyword(__is_compound)
+#endif // __has_builtin(__is_compound)
 
 _LIBCPP_END_NAMESPACE_STD
 

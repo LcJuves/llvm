@@ -102,7 +102,7 @@ struct DomainValue {
 
   /// First domain available.
   unsigned getFirstDomain() const {
-    return countTrailingZeros(AvailableDomains);
+    return llvm::countr_zero(AvailableDomains);
   }
 
   /// Clear this DomainValue and point to next which has all its data.
@@ -118,9 +118,9 @@ class ExecutionDomainFix : public MachineFunctionPass {
   SmallVector<DomainValue *, 16> Avail;
 
   const TargetRegisterClass *const RC;
-  MachineFunction *MF;
-  const TargetInstrInfo *TII;
-  const TargetRegisterInfo *TRI;
+  MachineFunction *MF = nullptr;
+  const TargetInstrInfo *TII = nullptr;
+  const TargetRegisterInfo *TRI = nullptr;
   std::vector<SmallVector<int, 1>> AliasMap;
   const unsigned NumRegs;
   /// Value currently in each register, or NULL when no value is being tracked.
@@ -133,7 +133,7 @@ class ExecutionDomainFix : public MachineFunctionPass {
   using OutRegsInfoMap = SmallVector<LiveRegsDVInfo, 4>;
   OutRegsInfoMap MBBOutRegsInfos;
 
-  ReachingDefAnalysis *RDA;
+  ReachingDefAnalysis *RDA = nullptr;
 
 public:
   ExecutionDomainFix(char &PassID, const TargetRegisterClass &RC)
@@ -156,7 +156,7 @@ private:
   /// Translate TRI register number to a list of indices into our smaller tables
   /// of interesting registers.
   iterator_range<SmallVectorImpl<int>::const_iterator>
-  regIndices(unsigned Reg) const;
+  regIndices(MCRegister Reg) const;
 
   /// DomainValue allocation.
   DomainValue *alloc(int domain = -1);

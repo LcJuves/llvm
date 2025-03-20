@@ -44,10 +44,29 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Timer.h"
+#include <optional>
 
 namespace clang {
 
 namespace ast_matchers {
+
+/// A struct defining options for configuring the MatchFinder.
+struct MatchFinderOptions {
+  struct Profiling {
+    Profiling(llvm::StringMap<llvm::TimeRecord> &Records) : Records(Records) {}
+
+    /// Per bucket timing information.
+    llvm::StringMap<llvm::TimeRecord> &Records;
+  };
+
+  /// Enables per-check timers.
+  ///
+  /// It prints a report after match.
+  std::optional<Profiling> CheckProfiling;
+
+  /// Avoids matching declarations in system headers.
+  bool SkipSystemHeaders = false;
+};
 
 /// A class to allow finding matches over the Clang AST.
 ///
@@ -115,7 +134,7 @@ public:
     /// the result nodes. This API is temporary to facilitate
     /// third parties porting existing code to the default
     /// behavior of clang-tidy.
-    virtual llvm::Optional<TraversalKind> getCheckTraversalKind() const;
+    virtual std::optional<TraversalKind> getCheckTraversalKind() const;
   };
 
   /// Called when parsing is finished. Intended for testing only.
@@ -123,21 +142,6 @@ public:
   public:
     virtual ~ParsingDoneTestCallback();
     virtual void run() = 0;
-  };
-
-  struct MatchFinderOptions {
-    struct Profiling {
-      Profiling(llvm::StringMap<llvm::TimeRecord> &Records)
-          : Records(Records) {}
-
-      /// Per bucket timing information.
-      llvm::StringMap<llvm::TimeRecord> &Records;
-    };
-
-    /// Enables per-check timers.
-    ///
-    /// It prints a report after match.
-    llvm::Optional<Profiling> CheckProfiling;
   };
 
   MatchFinder(MatchFinderOptions Options = MatchFinderOptions());
@@ -289,8 +293,8 @@ public:
     Nodes.push_back(Result.Nodes);
   }
 
-  llvm::Optional<TraversalKind> getCheckTraversalKind() const override {
-    return llvm::None;
+  std::optional<TraversalKind> getCheckTraversalKind() const override {
+    return std::nullopt;
   }
 
   SmallVector<BoundNodes, 1> Nodes;

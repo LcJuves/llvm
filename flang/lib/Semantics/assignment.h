@@ -29,9 +29,6 @@ class AssignmentContext;
 class Scope;
 class Symbol;
 
-// Applies checks from C1594(1-2) on definitions in pure subprograms
-bool CheckDefinabilityInPureScope(parser::ContextualMessages &, const Symbol &,
-    const Scope &context, const Scope &pure);
 // Applies checks from C1594(5-6) on copying pointers in pure subprograms
 bool CheckCopyabilityInPureScope(parser::ContextualMessages &,
     const evaluate::Expr<evaluate::SomeType> &, const Scope &);
@@ -48,6 +45,14 @@ public:
   void Leave(const parser::EndWhereStmt &);
   void Enter(const parser::MaskedElsewhereStmt &);
   void Leave(const parser::MaskedElsewhereStmt &);
+  void Enter(const parser::CUFKernelDoConstruct &);
+  void Leave(const parser::CUFKernelDoConstruct &);
+  void Enter(const parser::OpenACCBlockConstruct &);
+  void Leave(const parser::OpenACCBlockConstruct &);
+  void Enter(const parser::OpenACCCombinedConstruct &);
+  void Leave(const parser::OpenACCCombinedConstruct &);
+  void Enter(const parser::OpenACCLoopConstruct &);
+  void Leave(const parser::OpenACCLoopConstruct &);
 
 private:
   common::Indirection<AssignmentContext> context_;

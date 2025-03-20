@@ -12,6 +12,7 @@ int dyn_init_global = global;
 int __attribute__((no_sanitize("address"))) attributed_global;
 int __attribute__((disable_sanitizer_instrumentation)) disable_instrumentation_global;
 int ignorelisted_global;
+extern int __attribute__((no_sanitize("address"))) external_global;
 
 int __attribute__((section("__DATA, __common"))) sectioned_global; // KASAN - ignore globals in a section
 extern "C" {
@@ -21,6 +22,7 @@ int __special_global; // KASAN - ignore globals with __-prefix
 void func() {
   static int static_var = 0;
   const char *literal = "Hello, world!";
+  external_global = 1;
 }
 
 // GLOBS:     @{{.*}}extra_global{{.*}} ={{.*}} global
@@ -49,6 +51,8 @@ void func() {
 // GLOBS:     @{{.*}} = {{.*}}c"Hello, world!\00"
 // GLOBS-NOT: no_sanitize_address
 
+// GLOBS: @{{.*}}external_global{{.*}} ={{.*}} no_sanitize_address
+
 /// Without -fasynchronous-unwind-tables, ctor and dtor get the uwtable attribute.
 // CHECK-LABEL: define internal void @asan.module_ctor() #[[#ATTR:]] {
 // ASAN-NEXT: call void @__asan_init
@@ -63,13 +67,13 @@ void func() {
 // CHECK-NEXT: call void @__asan_unregister_globals
 // CHECK-NEXT: ret void
 
-// CHECK: attributes #[[#ATTR]] = { nounwind }
+// CHECK: attributes #[[#ATTR]] = { nounwind
 
 /// If -fasynchronous-unwind-tables, set the module flag "uwtable". ctor/dtor
 /// will thus get the uwtable attribute.
 // RUN: %clang_cc1 -emit-llvm -fsanitize=address -funwind-tables=2 -o - %s | FileCheck %s --check-prefixes=UWTABLE
 // UWTABLE: define internal void @asan.module_dtor() #[[#ATTR:]] {
-// UWTABLE: attributes #[[#ATTR]] = { nounwind uwtable }
+// UWTABLE: attributes #[[#ATTR]] = { nounwind uwtable
 // UWTABLE: ![[#]] = !{i32 7, !"uwtable", i32 2}
 
 // IGNORELIST-SRC:     @{{.*}}extra_global{{.*}} ={{.*}} global
@@ -83,3 +87,4 @@ void func() {
 // IGNORELIST-SRC:     @{{.*}}__special_global{{.*}} ={{.*}} global {{.*}} no_sanitize_address
 // IGNORELIST-SRC:     @{{.*}}static_var{{.*}} ={{.*}} global {{.*}} no_sanitize_address
 // IGNORELIST-SRC:     @{{.*}} ={{.*}} c"Hello, world!\00"{{.*}} no_sanitize_address
+// IGNORELIST-SRC:     @{{.*}}external_global{{.*}} ={{.*}} no_sanitize_address

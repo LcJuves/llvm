@@ -20,8 +20,7 @@ using namespace llvm::orc::rt_bootstrap;
 
 namespace {
 
-orc::shared::CWrapperFunctionResult incrementWrapper(const char *ArgData,
-                                                     size_t ArgSize) {
+CWrapperFunctionResult incrementWrapper(const char *ArgData, size_t ArgSize) {
   return WrapperFunction<SPSError(SPSExecutorAddr)>::handle(
              ArgData, ArgSize,
              [](ExecutorAddr A) -> Error {
@@ -45,7 +44,7 @@ TEST(SimpleExecutorMemoryManagerTest, AllocFinalizeFree) {
 
   tpctypes::FinalizeRequest FR;
   FR.Segments.push_back(
-      tpctypes::SegFinalizeRequest{tpctypes::WPF_Read | tpctypes::WPF_Write,
+      tpctypes::SegFinalizeRequest{MemProt::Read | MemProt::Write,
                                    *Mem,
                                    AllocSize,
                                    {HW.data(), HW.size() + 1}});

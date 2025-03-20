@@ -11,15 +11,14 @@ define void @volatile_load_2_elts() {
 ; AVX-LABEL: volatile_load_2_elts:
 ; AVX:       # %bb.0:
 ; AVX-NEXT:    vmovaps g0(%rip), %xmm0
-; AVX-NEXT:    vmovddup {{.*#+}} xmm0 = xmm0[0,0]
-; AVX-NEXT:    vinsertf128 $1, %xmm0, %ymm0, %ymm1
-; AVX-NEXT:    vpermilpd {{.*#+}} ymm1 = ymm1[0,0,3,2]
-; AVX-NEXT:    vxorpd %xmm2, %xmm2, %xmm2
-; AVX-NEXT:    vblendpd {{.*#+}} ymm1 = ymm2[0,1],ymm1[2],ymm2[3]
-; AVX-NEXT:    vinsertf128 $1, %xmm0, %ymm0, %ymm0
-; AVX-NEXT:    vblendpd {{.*#+}} ymm0 = ymm2[0],ymm0[1],ymm2[2],ymm0[3]
-; AVX-NEXT:    vmovapd %ymm0, (%rax)
-; AVX-NEXT:    vmovapd %ymm1, (%rax)
+; AVX-NEXT:    vmovddup {{.*#+}} xmm1 = xmm0[0,0]
+; AVX-NEXT:    vinsertf128 $1, %xmm1, %ymm1, %ymm1
+; AVX-NEXT:    vxorps %xmm2, %xmm2, %xmm2
+; AVX-NEXT:    vblendps {{.*#+}} ymm1 = ymm2[0,1],ymm1[2,3],ymm2[4,5],ymm1[6,7]
+; AVX-NEXT:    vperm2f128 {{.*#+}} ymm0 = zero,zero,ymm0[0,1]
+; AVX-NEXT:    vblendps {{.*#+}} ymm0 = ymm2[0,1,2,3],ymm0[4,5],ymm2[6,7]
+; AVX-NEXT:    vmovaps %ymm0, (%rax)
+; AVX-NEXT:    vmovaps %ymm1, (%rax)
 ; AVX-NEXT:    vzeroupper
 ; AVX-NEXT:    retq
 ;
@@ -84,13 +83,13 @@ define void @elts_from_consecutive_loads(ptr %arg, ptr %arg12, ptr %arg13, float
 ; ALL-LABEL: elts_from_consecutive_loads:
 ; ALL:       # %bb.0: # %bb
 ; ALL-NEXT:    vxorps %xmm1, %xmm1, %xmm1
-; ALL-NEXT:    .p2align 4, 0x90
+; ALL-NEXT:    .p2align 4
 ; ALL-NEXT:  .LBB3_1: # %bb16
 ; ALL-NEXT:    # =>This Loop Header: Depth=1
 ; ALL-NEXT:    # Child Loop BB3_2 Depth 2
 ; ALL-NEXT:    testb $1, %cl
 ; ALL-NEXT:    je .LBB3_1
-; ALL-NEXT:    .p2align 4, 0x90
+; ALL-NEXT:    .p2align 4
 ; ALL-NEXT:  .LBB3_2: # %bb17
 ; ALL-NEXT:    # Parent Loop BB3_1 Depth=1
 ; ALL-NEXT:    # => This Inner Loop Header: Depth=2

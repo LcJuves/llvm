@@ -16,9 +16,9 @@
 #include "llvm/MC/MCFixupKindInfo.h"
 #include "llvm/MC/MCMachObjectWriter.h"
 #include "llvm/MC/MCObjectWriter.h"
-#include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/MCSymbolELF.h"
+#include "llvm/MC/MCSymbolXCOFF.h"
 #include "llvm/MC/MCValue.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -86,12 +86,9 @@ protected:
   Triple TT;
 public:
   PPCAsmBackend(const Target &T, const Triple &TT)
-      : MCAsmBackend(TT.isLittleEndian() ? support::little : support::big),
+      : MCAsmBackend(TT.isLittleEndian() ? llvm::endianness::little
+                                         : llvm::endianness::big),
         TT(TT) {}
-
-  unsigned getNumFixupKinds() const override {
-    return PPC::NumTargetFixupKinds;
-  }
 
   const MCFixupKindInfo &getFixupKindInfo(MCFixupKind Kind) const override {
     const static MCFixupKindInfo InfosBE[PPC::NumTargetFixupKinds] = {
@@ -129,9 +126,9 @@ public:
     if (Kind < FirstTargetFixupKind)
       return MCAsmBackend::getFixupKindInfo(Kind);
 
-    assert(unsigned(Kind - FirstTargetFixupKind) < getNumFixupKinds() &&
+    assert(Kind - FirstTargetFixupKind < PPC::NumTargetFixupKinds &&
            "Invalid kind!");
-    return (Endian == support::little
+    return (Endian == llvm::endianness::little
                 ? InfosLE
                 : InfosBE)[Kind - FirstTargetFixupKind];
   }
@@ -153,17 +150,19 @@ public:
     // from the fixup value. The Value has been "split up" into the appropriate
     // bitfields above.
     for (unsigned i = 0; i != NumBytes; ++i) {
-      unsigned Idx = Endian == support::little ? i : (NumBytes - 1 - i);
+      unsigned Idx =
+          Endian == llvm::endianness::little ? i : (NumBytes - 1 - i);
       Data[Offset + i] |= uint8_t((Value >> (Idx * 8)) & 0xff);
     }
   }
 
   bool shouldForceRelocation(const MCAssembler &Asm, const MCFixup &Fixup,
-                             const MCValue &Target) override {
+                             const MCValue &Target,
+                             const MCSubtargetInfo *STI) override {
     MCFixupKind Kind = Fixup.getKind();
     switch ((unsigned)Kind) {
     default:
-      return Kind >= FirstLiteralRelocationKind;
+      return false;
     case PPC::fixup_ppc_br24:
     case PPC::fixup_ppc_br24abs:
     case PPC::fixup_ppc_br24_notoc:
@@ -178,18 +177,13 @@ public:
           unsigned Other = S->getOther() << 2;
           if ((Other & ELF::STO_PPC64_LOCAL_MASK) != 0)
             return true;
-        }
+        } else if (const auto *S = dyn_cast<MCSymbolXCOFF>(&A->getSymbol())) {
+          return !Target.isAbsolute() && S->isExternal() &&
+                 S->getStorageClass() == XCOFF::C_WEAKEXT;
+       }
       }
       return false;
     }
-  }
-
-  bool fixupNeedsRelaxation(const MCFixup &Fixup,
-                            uint64_t Value,
-                            const MCRelaxableFragment *DF,
-                            const MCAsmLayout &Layout) const override {
-    // FIXME.
-    llvm_unreachable("relaxInstruction() unimplemented");
   }
 
   void relaxInstruction(MCInst &Inst,
@@ -226,7 +220,7 @@ public:
     return createPPCELFObjectWriter(Is64, OSABI);
   }
 
-  Optional<MCFixupKind> getFixupKind(StringRef Name) const override;
+  std::optional<MCFixupKind> getFixupKind(StringRef Name) const override;
 };
 
 class XCOFFPPCAsmBackend : public PPCAsmBackend {
@@ -238,11 +232,14 @@ public:
   createObjectTargetWriter() const override {
     return createPPCXCOFFObjectWriter(TT.isArch64Bit());
   }
+
+  std::optional<MCFixupKind> getFixupKind(StringRef Name) const override;
 };
 
 } // end anonymous namespace
 
-Optional<MCFixupKind> ELFPPCAsmBackend::getFixupKind(StringRef Name) const {
+std::optional<MCFixupKind>
+ELFPPCAsmBackend::getFixupKind(StringRef Name) const {
   if (TT.isOSBinFormatELF()) {
     unsigned Type;
     if (TT.isPPC64()) {
@@ -268,7 +265,14 @@ Optional<MCFixupKind> ELFPPCAsmBackend::getFixupKind(StringRef Name) const {
     if (Type != -1u)
       return static_cast<MCFixupKind>(FirstLiteralRelocationKind + Type);
   }
-  return None;
+  return std::nullopt;
+}
+
+std::optional<MCFixupKind>
+XCOFFPPCAsmBackend::getFixupKind(StringRef Name) const {
+  return StringSwitch<std::optional<MCFixupKind>>(Name)
+      .Case("R_REF", (MCFixupKind)PPC::fixup_ppc_nofixup)
+      .Default(std::nullopt);
 }
 
 MCAsmBackend *llvm::createPPCAsmBackend(const Target &T,

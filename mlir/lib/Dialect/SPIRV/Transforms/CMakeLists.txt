@@ -1,9 +1,10 @@
 set(LLVM_OPTIONAL_SOURCES
-  CanonicalizeGLSLPass.cpp
+  CanonicalizeGLPass.cpp
   DecorateCompositeTypeLayoutPass.cpp
   LowerABIAttributesPass.cpp
   RewriteInsertsPass.cpp
   SPIRVConversion.cpp
+  SPIRVWebGPUTransforms.cpp
   UnifyAliasedResourcePass.cpp
   UpdateVCEPass.cpp
 )
@@ -15,16 +16,24 @@ add_mlir_dialect_library(MLIRSPIRVConversion
   ${MLIR_MAIN_INCLUDE_DIR}/mlir/Dialect/SPIRV
 
   LINK_LIBS PUBLIC
+  MLIRArithDialect
+  MLIRDialectUtils
   MLIRFuncDialect
+  MLIRIR
+  MLIRPass
   MLIRSPIRVDialect
+  MLIRSupport
   MLIRTransformUtils
+  MLIRVectorDialect
+  MLIRVectorTransforms
 )
 
 add_mlir_dialect_library(MLIRSPIRVTransforms
-  CanonicalizeGLSLPass.cpp
+  CanonicalizeGLPass.cpp
   DecorateCompositeTypeLayoutPass.cpp
   LowerABIAttributesPass.cpp
   RewriteInsertsPass.cpp
+  SPIRVWebGPUTransforms.cpp
   UnifyAliasedResourcePass.cpp
   UpdateVCEPass.cpp
 

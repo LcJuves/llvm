@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03, c++11, c++14, c++17
-// UNSUPPORTED: libcpp-has-no-incomplete-ranges
 
 // <memory>
 //
@@ -98,16 +97,6 @@ constexpr bool test() {
 
     std::destroy(out, out + 1);
     alloc.deallocate(out, 2);
-  }
-
-  // Works with const pointers.
-  {
-    int x = 1;
-    const int* ptr = &x;
-
-    const int* result = std::ranges::construct_at(ptr, 42);
-    assert(result == ptr);
-    assert(x == 42);
   }
 
   return true;

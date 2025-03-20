@@ -13,34 +13,23 @@
 
 #include "TestAttributes.h"
 #include "TestDialect.h"
+#include "TestTypes.h"
+#include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/ExtensibleDialect.h"
+#include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/Types.h"
-#include "mlir/Support/LogicalResult.h"
+#include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/Hashing.h"
-#include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/ADT/bit.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace mlir;
 using namespace test;
-
-//===----------------------------------------------------------------------===//
-// AttrWithTypeBuilderAttr
-//===----------------------------------------------------------------------===//
-
-Attribute AttrWithTypeBuilderAttr::parse(AsmParser &parser, Type type) {
-  IntegerAttr element;
-  if (parser.parseAttribute(element))
-    return Attribute();
-  return get(parser.getContext(), element);
-}
-
-void AttrWithTypeBuilderAttr::print(AsmPrinter &printer) const {
-  printer << " " << getAttr();
-}
 
 //===----------------------------------------------------------------------===//
 // CompoundAAttr
@@ -77,6 +66,39 @@ void CompoundAAttr::print(AsmPrinter &printer) const {
 // CompoundAAttr
 //===----------------------------------------------------------------------===//
 
+Attribute TestDecimalShapeAttr::parse(AsmParser &parser, Type type) {
+  if (parser.parseLess()) {
+    return Attribute();
+  }
+  SmallVector<int64_t> shape;
+  if (parser.parseOptionalGreater()) {
+    auto parseDecimal = [&]() {
+      shape.emplace_back();
+      auto parseResult = parser.parseOptionalDecimalInteger(shape.back());
+      if (!parseResult.has_value() || failed(*parseResult)) {
+        parser.emitError(parser.getCurrentLocation()) << "expected an integer";
+        return failure();
+      }
+      return success();
+    };
+    if (failed(parseDecimal())) {
+      return Attribute();
+    }
+    while (failed(parser.parseOptionalGreater())) {
+      if (failed(parser.parseXInDimensionList()) || failed(parseDecimal())) {
+        return Attribute();
+      }
+    }
+  }
+  return get(parser.getContext(), shape);
+}
+
+void TestDecimalShapeAttr::print(AsmPrinter &printer) const {
+  printer << "<";
+  llvm::interleave(getShape(), printer, "x");
+  printer << ">";
+}
+
 Attribute TestI64ElementsAttr::parse(AsmParser &parser, Type type) {
   SmallVector<uint64_t> elements;
   if (parser.parseLess() || parser.parseLSquare())
@@ -91,13 +113,13 @@ Attribute TestI64ElementsAttr::parse(AsmParser &parser, Type type) {
   if (parser.parseRSquare() || parser.parseGreater())
     return Attribute();
   return parser.getChecked<TestI64ElementsAttr>(
-      parser.getContext(), type.cast<ShapedType>(), elements);
+      parser.getContext(), llvm::cast<ShapedType>(type), elements);
 }
 
 void TestI64ElementsAttr::print(AsmPrinter &printer) const {
   printer << "<[";
   llvm::interleaveComma(getElements(), printer);
-  printer << "] : " << getType() << ">";
+  printer << "]>";
 }
 
 LogicalResult
@@ -116,8 +138,8 @@ TestI64ElementsAttr::verify(function_ref<InFlightDiagnostic()> emitError,
 
 LogicalResult TestAttrWithFormatAttr::verify(
     function_ref<InFlightDiagnostic()> emitError, int64_t one, std::string two,
-    IntegerAttr three, ArrayRef<int> four,
-    ArrayRef<AttrWithTypeBuilderAttr> arrayOfAttrWithTypeBuilderAttr) {
+    IntegerAttr three, ArrayRef<int> four, uint64_t five, ArrayRef<int> six,
+    ArrayRef<AttrWithTypeBuilderAttr> arrayOfAttrs) {
   if (four.size() != static_cast<unsigned>(one))
     return emitError() << "expected 'one' to equal 'four.size()'";
   return success();
@@ -165,41 +187,187 @@ void TestSubElementsAccessAttr::print(::mlir::AsmPrinter &printer) const {
           << ">";
 }
 
-void TestSubElementsAccessAttr::walkImmediateSubElements(
-    llvm::function_ref<void(mlir::Attribute)> walkAttrsFn,
-    llvm::function_ref<void(mlir::Type)> walkTypesFn) const {
-  walkAttrsFn(getFirst());
-  walkAttrsFn(getSecond());
-  walkAttrsFn(getThird());
-}
-
-SubElementAttrInterface TestSubElementsAccessAttr::replaceImmediateSubAttribute(
-    ArrayRef<std::pair<size_t, Attribute>> replacements) const {
-  Attribute first = getFirst();
-  Attribute second = getSecond();
-  Attribute third = getThird();
-  for (auto &it : replacements) {
-    switch (it.first) {
-    case 0:
-      first = it.second;
-      break;
-    case 1:
-      second = it.second;
-      break;
-    case 2:
-      third = it.second;
-      break;
-    }
-  }
-  return get(getContext(), first, second, third);
-}
-
 //===----------------------------------------------------------------------===//
 // TestExtern1DI64ElementsAttr
 //===----------------------------------------------------------------------===//
 
 ArrayRef<uint64_t> TestExtern1DI64ElementsAttr::getElements() const {
-  return getHandle().getData()->getData();
+  if (auto *blob = getHandle().getBlob())
+    return blob->getDataAs<uint64_t>();
+  return std::nullopt;
+}
+
+//===----------------------------------------------------------------------===//
+// TestCustomAnchorAttr
+//===----------------------------------------------------------------------===//
+
+static ParseResult parseTrueFalse(AsmParser &p, std::optional<int> &result) {
+  bool b;
+  if (p.parseInteger(b))
+    return failure();
+  result = b;
+  return success();
+}
+
+static void printTrueFalse(AsmPrinter &p, std::optional<int> result) {
+  p << (*result ? "true" : "false");
+}
+
+//===----------------------------------------------------------------------===//
+// CopyCountAttr Implementation
+//===----------------------------------------------------------------------===//
+
+CopyCount::CopyCount(const CopyCount &rhs) : value(rhs.value) {
+  CopyCount::counter++;
+}
+
+CopyCount &CopyCount::operator=(const CopyCount &rhs) {
+  CopyCount::counter++;
+  value = rhs.value;
+  return *this;
+}
+
+int CopyCount::counter;
+
+static bool operator==(const test::CopyCount &lhs, const test::CopyCount &rhs) {
+  return lhs.value == rhs.value;
+}
+
+llvm::raw_ostream &test::operator<<(llvm::raw_ostream &os,
+                                    const test::CopyCount &value) {
+  return os << value.value;
+}
+
+template <>
+struct mlir::FieldParser<test::CopyCount> {
+  static FailureOr<test::CopyCount> parse(AsmParser &parser) {
+    std::string value;
+    if (parser.parseKeyword(value))
+      return failure();
+    return test::CopyCount(value);
+  }
+};
+namespace test {
+llvm::hash_code hash_value(const test::CopyCount &copyCount) {
+  return llvm::hash_value(copyCount.value);
+}
+} // namespace test
+
+//===----------------------------------------------------------------------===//
+// TestConditionalAliasAttr
+//===----------------------------------------------------------------------===//
+
+/// Attempt to parse the conditionally-aliased string attribute as a keyword or
+/// string, else try to parse an alias.
+static ParseResult parseConditionalAlias(AsmParser &p, StringAttr &value) {
+  std::string str;
+  if (succeeded(p.parseOptionalKeywordOrString(&str))) {
+    value = StringAttr::get(p.getContext(), str);
+    return success();
+  }
+  return p.parseAttribute(value);
+}
+
+/// Print the string attribute as an alias if it has one, otherwise print it as
+/// a keyword if possible.
+static void printConditionalAlias(AsmPrinter &p, StringAttr value) {
+  if (succeeded(p.printAlias(value)))
+    return;
+  p.printKeywordOrString(value);
+}
+
+//===----------------------------------------------------------------------===//
+// Custom Float Attribute
+//===----------------------------------------------------------------------===//
+
+static void printCustomFloatAttr(AsmPrinter &p, StringAttr typeStrAttr,
+                                 APFloat value) {
+  p << typeStrAttr << " : " << value;
+}
+
+static ParseResult parseCustomFloatAttr(AsmParser &p, StringAttr &typeStrAttr,
+                                        FailureOr<APFloat> &value) {
+
+  std::string str;
+  if (p.parseString(&str))
+    return failure();
+
+  typeStrAttr = StringAttr::get(p.getContext(), str);
+
+  if (p.parseColon())
+    return failure();
+
+  const llvm::fltSemantics *semantics;
+  if (str == "float")
+    semantics = &llvm::APFloat::IEEEsingle();
+  else if (str == "double")
+    semantics = &llvm::APFloat::IEEEdouble();
+  else if (str == "fp80")
+    semantics = &llvm::APFloat::x87DoubleExtended();
+  else
+    return p.emitError(p.getCurrentLocation(), "unknown float type, expected "
+                                               "'float', 'double' or 'fp80'");
+
+  APFloat parsedValue(0.0);
+  if (p.parseFloat(*semantics, parsedValue))
+    return failure();
+
+  value.emplace(parsedValue);
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// TestOpAsmAttrInterfaceAttr
+//===----------------------------------------------------------------------===//
+
+::mlir::OpAsmDialectInterface::AliasResult
+TestOpAsmAttrInterfaceAttr::getAlias(::llvm::raw_ostream &os) const {
+  os << "op_asm_attr_interface_";
+  os << getValue().getValue();
+  return ::mlir::OpAsmDialectInterface::AliasResult::FinalAlias;
+}
+
+//===----------------------------------------------------------------------===//
+// TestConstMemorySpaceAttr
+//===----------------------------------------------------------------------===//
+
+LogicalResult TestConstMemorySpaceAttr::isValidLoad(
+    Type type, mlir::ptr::AtomicOrdering ordering, IntegerAttr alignment,
+    function_ref<InFlightDiagnostic()> emitError) const {
+  return success();
+}
+
+LogicalResult TestConstMemorySpaceAttr::isValidStore(
+    Type type, mlir::ptr::AtomicOrdering ordering, IntegerAttr alignment,
+    function_ref<InFlightDiagnostic()> emitError) const {
+  return emitError ? (emitError() << "memory space is read-only") : failure();
+}
+
+LogicalResult TestConstMemorySpaceAttr::isValidAtomicOp(
+    mlir::ptr::AtomicBinOp binOp, Type type, mlir::ptr::AtomicOrdering ordering,
+    IntegerAttr alignment, function_ref<InFlightDiagnostic()> emitError) const {
+  return emitError ? (emitError() << "memory space is read-only") : failure();
+}
+
+LogicalResult TestConstMemorySpaceAttr::isValidAtomicXchg(
+    Type type, mlir::ptr::AtomicOrdering successOrdering,
+    mlir::ptr::AtomicOrdering failureOrdering, IntegerAttr alignment,
+    function_ref<InFlightDiagnostic()> emitError) const {
+  return emitError ? (emitError() << "memory space is read-only") : failure();
+}
+
+LogicalResult TestConstMemorySpaceAttr::isValidAddrSpaceCast(
+    Type tgt, Type src, function_ref<InFlightDiagnostic()> emitError) const {
+  return emitError
+             ? (emitError() << "memory space doesn't allow addrspace casts")
+             : failure();
+}
+
+LogicalResult TestConstMemorySpaceAttr::isValidPtrIntCast(
+    Type intLikeTy, Type ptrLikeTy,
+    function_ref<InFlightDiagnostic()> emitError) const {
+  return emitError ? (emitError() << "memory space doesn't allow int-ptr casts")
+                   : failure();
 }
 
 //===----------------------------------------------------------------------===//
@@ -207,7 +375,7 @@ ArrayRef<uint64_t> TestExtern1DI64ElementsAttr::getElements() const {
 //===----------------------------------------------------------------------===//
 
 #include "TestAttrInterfaces.cpp.inc"
-
+#include "TestOpEnums.cpp.inc"
 #define GET_ATTRDEF_CLASSES
 #include "TestAttrDefs.cpp.inc"
 

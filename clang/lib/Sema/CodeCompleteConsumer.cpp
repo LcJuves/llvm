@@ -21,15 +21,11 @@
 #include "clang/Basic/IdentifierTable.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Sema/Sema.h"
-#include "llvm/ADT/SmallString.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
-#include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cassert>
@@ -51,6 +47,7 @@ bool CodeCompletionContext::wantConstructorResults() const {
   case CCC_ParenthesizedExpression:
   case CCC_Symbol:
   case CCC_SymbolOrNewName:
+  case CCC_TopLevelOrExpression:
     return true;
 
   case CCC_TopLevel:
@@ -83,6 +80,7 @@ bool CodeCompletionContext::wantConstructorResults() const {
   case CCC_ObjCCategoryName:
   case CCC_IncludedFile:
   case CCC_Attribute:
+  case CCC_ObjCClassForwardDecl:
     return false;
   }
 
@@ -166,6 +164,10 @@ StringRef clang::getCompletionKindString(CodeCompletionContext::Kind Kind) {
     return "Attribute";
   case CCKind::CCC_Recovery:
     return "Recovery";
+  case CCKind::CCC_ObjCClassForwardDecl:
+    return "ObjCClassForwardDecl";
+  case CCKind::CCC_TopLevelOrExpression:
+    return "ReplTopLevel";
   }
   llvm_unreachable("Invalid CodeCompletionContext::Kind!");
 }
@@ -515,13 +517,21 @@ CodeCompleteConsumer::OverloadCandidate::getFunctionType() const {
 
   case CK_FunctionType:
     return Type;
-
+  case CK_FunctionProtoTypeLoc:
+    return ProtoTypeLoc.getTypePtr();
   case CK_Template:
   case CK_Aggregate:
     return nullptr;
   }
 
   llvm_unreachable("Invalid CandidateKind!");
+}
+
+const FunctionProtoTypeLoc
+CodeCompleteConsumer::OverloadCandidate::getFunctionProtoTypeLoc() const {
+  if (Kind == CK_FunctionProtoTypeLoc)
+    return ProtoTypeLoc;
+  return FunctionProtoTypeLoc();
 }
 
 unsigned CodeCompleteConsumer::OverloadCandidate::getNumParams() const {
@@ -597,7 +607,12 @@ CodeCompleteConsumer::OverloadCandidate::getParamDecl(unsigned N) const {
   if (const auto *FD = getFunction()) {
     if (N < FD->param_size())
       return FD->getParamDecl(N);
+  } else if (Kind == CK_FunctionProtoTypeLoc) {
+    if (N < ProtoTypeLoc.getNumParams()) {
+      return ProtoTypeLoc.getParam(N);
+    }
   }
+
   return nullptr;
 }
 
@@ -611,15 +626,16 @@ bool PrintingCodeCompleteConsumer::isResultFilteredOut(
     StringRef Filter, CodeCompletionResult Result) {
   switch (Result.Kind) {
   case CodeCompletionResult::RK_Declaration:
-    return !(Result.Declaration->getIdentifier() &&
-             Result.Declaration->getIdentifier()->getName().startswith(Filter));
+    return !(
+        Result.Declaration->getIdentifier() &&
+        Result.Declaration->getIdentifier()->getName().starts_with(Filter));
   case CodeCompletionResult::RK_Keyword:
-    return !StringRef(Result.Keyword).startswith(Filter);
+    return !StringRef(Result.Keyword).starts_with(Filter);
   case CodeCompletionResult::RK_Macro:
-    return !Result.Macro->getName().startswith(Filter);
+    return !Result.Macro->getName().starts_with(Filter);
   case CodeCompletionResult::RK_Pattern:
     return !(Result.Pattern->getTypedText() &&
-             StringRef(Result.Pattern->getTypedText()).startswith(Filter));
+             StringRef(Result.Pattern->getTypedText()).starts_with(Filter));
   }
   llvm_unreachable("Unknown code completion result Kind.");
 }
@@ -763,7 +779,7 @@ void CodeCompletionResult::computeCursorKindAndAvailability(bool Accessible) {
       // Do nothing: Patterns can come with cursor kinds!
       break;
     }
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
 
   case RK_Declaration: {
     // Set the availability based on attributes.
@@ -834,7 +850,8 @@ StringRef CodeCompletionResult::getOrderedName(std::string &Saved) const {
   if (IdentifierInfo *Id = Name.getAsIdentifierInfo())
     return Id->getName();
   if (Name.isObjCZeroArgSelector())
-    if (IdentifierInfo *Id = Name.getObjCSelector().getIdentifierInfoForSlot(0))
+    if (const IdentifierInfo *Id =
+            Name.getObjCSelector().getIdentifierInfoForSlot(0))
       return Id->getName();
 
   Saved = Name.getAsString();

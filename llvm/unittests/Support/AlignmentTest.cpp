@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/Alignment.h"
+#include "llvm/ADT/STLExtras.h"
 #include "gtest/gtest.h"
 
 #include <vector>
@@ -63,11 +64,11 @@ TEST(AlignmentTest, ValidCTors) {
 
 TEST(AlignmentTest, CheckMaybeAlignHasValue) {
   EXPECT_TRUE(MaybeAlign(1));
-  EXPECT_TRUE(MaybeAlign(1).hasValue());
+  EXPECT_TRUE(MaybeAlign(1).has_value());
   EXPECT_FALSE(MaybeAlign(0));
-  EXPECT_FALSE(MaybeAlign(0).hasValue());
+  EXPECT_FALSE(MaybeAlign(0).has_value());
   EXPECT_FALSE(MaybeAlign());
-  EXPECT_FALSE(MaybeAlign().hasValue());
+  EXPECT_FALSE(MaybeAlign().has_value());
 }
 
 TEST(AlignmentTest, Division) {
@@ -150,8 +151,8 @@ TEST(AlignmentTest, isAligned_isAddrAligned) {
     MaybeAlign A(T.alignment);
     // Test Align
     if (A) {
-      EXPECT_EQ(isAligned(A.getValue(), T.offset), T.isAligned);
-      EXPECT_EQ(isAddrAligned(A.getValue(), T.forgedAddr()), T.isAligned);
+      EXPECT_EQ(isAligned(*A, T.offset), T.isAligned);
+      EXPECT_EQ(isAddrAligned(*A, T.forgedAddr()), T.isAligned);
     }
   }
 }
@@ -179,7 +180,7 @@ TEST(AlignmentTest, offsetToAlignment) {
 
 TEST(AlignmentTest, AlignComparisons) {
   std::vector<uint64_t> ValidAlignments = getValidAlignments();
-  std::sort(ValidAlignments.begin(), ValidAlignments.end());
+  llvm::sort(ValidAlignments);
   for (size_t I = 1; I < ValidAlignments.size(); ++I) {
     assert(I >= 1);
     const Align A(ValidAlignments[I - 1]);
@@ -232,10 +233,6 @@ std::vector<uint64_t> getValidAlignmentsForDeathTest() {
 }
 
 std::vector<uint64_t> getNonPowerOfTwo() { return {3, 10, 15}; }
-
-TEST(AlignmentDeathTest, CantConvertUnsetMaybe) {
-  EXPECT_DEATH((*MaybeAlign(0)), ".*");
-}
 
 TEST(AlignmentDeathTest, InvalidCTors) {
   EXPECT_DEATH((Align(0)), "Value must not be 0");

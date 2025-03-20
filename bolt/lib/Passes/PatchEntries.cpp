@@ -13,6 +13,7 @@
 
 #include "bolt/Passes/PatchEntries.h"
 #include "bolt/Utils/NameResolver.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/CommandLine.h"
 
 namespace opts {
@@ -30,25 +31,22 @@ llvm::cl::opt<bool>
 namespace llvm {
 namespace bolt {
 
-void PatchEntries::runOnFunctions(BinaryContext &BC) {
+Error PatchEntries::runOnFunctions(BinaryContext &BC) {
   if (!opts::ForcePatch) {
     // Mark the binary for patching if we did not create external references
     // for original code in any of functions we are not going to emit.
-    bool NeedsPatching = false;
-    for (auto &BFI : BC.getBinaryFunctions()) {
-      BinaryFunction &Function = BFI.second;
-      if (!BC.shouldEmit(Function) && !Function.hasExternalRefRelocations()) {
-        NeedsPatching = true;
-        break;
-      }
-    }
+    bool NeedsPatching = llvm::any_of(
+        llvm::make_second_range(BC.getBinaryFunctions()),
+        [&](BinaryFunction &BF) {
+          return !BC.shouldEmit(BF) && !BF.hasExternalRefRelocations();
+        });
 
     if (!NeedsPatching)
-      return;
+      return Error::success();
   }
 
   if (opts::Verbosity >= 1)
-    outs() << "BOLT-INFO: patching entries in original code\n";
+    BC.outs() << "BOLT-INFO: patching entries in original code\n";
 
   // Calculate the size of the patch.
   static size_t PatchSize = 0;
@@ -80,19 +78,18 @@ void PatchEntries::runOnFunctions(BinaryContext &BC) {
                                                   const MCSymbol *Symbol) {
       if (Offset < NextValidByte) {
         if (opts::Verbosity >= 1)
-          outs() << "BOLT-INFO: unable to patch entry point in " << Function
-                 << " at offset 0x" << Twine::utohexstr(Offset) << '\n';
+          BC.outs() << "BOLT-INFO: unable to patch entry point in " << Function
+                    << " at offset 0x" << Twine::utohexstr(Offset) << '\n';
         return false;
       }
 
-      PendingPatches.emplace_back(Patch{Symbol, Function.getAddress() + Offset,
-                                        Function.getFileOffset() + Offset,
-                                        Function.getOriginSection()});
+      PendingPatches.emplace_back(
+          Patch{Symbol, Function.getAddress() + Offset});
       NextValidByte = Offset + PatchSize;
       if (NextValidByte > Function.getMaxSize()) {
         if (opts::Verbosity >= 1)
-          outs() << "BOLT-INFO: function " << Function
-                 << " too small to patch its entry point\n";
+          BC.outs() << "BOLT-INFO: function " << Function
+                    << " too small to patch its entry point\n";
         return false;
       }
 
@@ -100,25 +97,32 @@ void PatchEntries::runOnFunctions(BinaryContext &BC) {
     });
 
     if (!Success) {
+      // We can't change output layout for AArch64 due to LongJmp pass
+      if (BC.isAArch64()) {
+        if (opts::ForcePatch) {
+          BC.errs() << "BOLT-ERROR: unable to patch entries in " << Function
+                    << "\n";
+          return createFatalBOLTError("");
+        }
+
+        continue;
+      }
+
       // If the original function entries cannot be patched, then we cannot
       // safely emit new function body.
-      errs() << "BOLT-WARNING: failed to patch entries in " << Function
-             << ". The function will not be optimized.\n";
+      BC.errs() << "BOLT-WARNING: failed to patch entries in " << Function
+                << ". The function will not be optimized.\n";
       Function.setIgnored();
       continue;
     }
 
     for (Patch &Patch : PendingPatches) {
-      BinaryFunction *PatchFunction = BC.createInjectedBinaryFunction(
+      // Add instruction patch to the binary.
+      InstructionListType Instructions;
+      BC.MIB->createLongTailCall(Instructions, Patch.Symbol, BC.Ctx.get());
+      BinaryFunction *PatchFunction = BC.createInstructionPatch(
+          Patch.Address, Instructions,
           NameResolver::append(Patch.Symbol->getName(), ".org.0"));
-      // Force the function to be emitted at the given address.
-      PatchFunction->setOutputAddress(Patch.Address);
-      PatchFunction->setFileOffset(Patch.FileOffset);
-      PatchFunction->setOriginSection(Patch.Section);
-
-      InstructionListType Seq;
-      BC.MIB->createLongTailCall(Seq, Patch.Symbol, BC.Ctx.get());
-      PatchFunction->addBasicBlock()->addInstructions(Seq);
 
       // Verify the size requirements.
       uint64_t HotSize, ColdSize;
@@ -126,9 +130,8 @@ void PatchEntries::runOnFunctions(BinaryContext &BC) {
       assert(!ColdSize && "unexpected cold code");
       assert(HotSize <= PatchSize && "max patch size exceeded");
     }
-
-    Function.setIsPatched(true);
   }
+  return Error::success();
 }
 
 } // end namespace bolt

@@ -18,8 +18,6 @@ class SourceMgr;
 } // namespace llvm
 
 namespace mlir {
-struct LogicalResult;
-
 namespace pdll {
 class CodeCompleteContext;
 
@@ -57,6 +55,7 @@ public:
     kw_erase,
     kw_let,
     kw_Constraint,
+    kw_not,
     kw_Op,
     kw_OpName,
     kw_Pattern,
@@ -133,7 +132,8 @@ public:
 
   /// Return if the token does not have the given kind.
   bool isNot(Kind k) const { return k != kind; }
-  template <typename... T> bool isNot(Kind k1, Kind k2, T... others) const {
+  template <typename... T>
+  bool isNot(Kind k1, Kind k2, T... others) const {
     return !isAny(k1, k2, others...);
   }
 
@@ -141,17 +141,13 @@ public:
   bool is(Kind k) const { return kind == k; }
 
   /// Return a location for the start of this token.
-  SMLoc getStartLoc() const {
-    return SMLoc::getFromPointer(spelling.data());
-  }
+  SMLoc getStartLoc() const { return SMLoc::getFromPointer(spelling.data()); }
   /// Return a location at the end of this token.
   SMLoc getEndLoc() const {
     return SMLoc::getFromPointer(spelling.data() + spelling.size());
   }
   /// Return a location for the range of this token.
-  SMRange getLoc() const {
-    return SMRange(getStartLoc(), getEndLoc());
-  }
+  SMRange getLoc() const { return SMRange(getStartLoc(), getEndLoc()); }
 
 private:
   /// Discriminator that indicates the kind of token this is.
@@ -193,8 +189,8 @@ public:
   /// Emit an error to the lexer with the given location and message.
   Token emitError(SMRange loc, const Twine &msg);
   Token emitError(const char *loc, const Twine &msg);
-  Token emitErrorAndNote(SMRange loc, const Twine &msg,
-                         SMRange noteLoc, const Twine &note);
+  Token emitErrorAndNote(SMRange loc, const Twine &msg, SMRange noteLoc,
+                         const Twine &note);
 
 private:
   Token formToken(Token::Kind kind, const char *tokStart) {

@@ -18,14 +18,17 @@
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/DeclCXX.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Timer.h"
 #include <deque>
 #include <memory>
 #include <set>
+#include <vector>
 
 namespace clang {
 namespace ast_matchers {
@@ -283,12 +286,13 @@ public:
     ScopedIncrement ScopedDepth(&CurrentDepth);
 
     for (unsigned I = 0, N = Node->capture_size(); I != N; ++I) {
-      const auto *C = Node->capture_begin() + I;
+      const LambdaCapture *C = Node->capture_begin() + I;
       if (!C->isExplicit())
         continue;
       if (Node->isInitCapture(C) && !match(*C->getCapturedVar()))
         return false;
-      if (!match(*Node->capture_init_begin()[I]))
+      const Expr *CIE = Node->capture_init_begin()[I];
+      if (CIE != nullptr && !match(*CIE))
         return false;
     }
 
@@ -419,7 +423,7 @@ class MatchASTVisitor : public RecursiveASTVisitor<MatchASTVisitor>,
                         public ASTMatchFinder {
 public:
   MatchASTVisitor(const MatchFinder::MatchersByType *Matchers,
-                  const MatchFinder::MatchFinderOptions &Options)
+                  const MatchFinderOptions &Options)
       : Matchers(Matchers), Options(Options), ActiveASTContext(nullptr) {}
 
   ~MatchASTVisitor() override {
@@ -651,11 +655,20 @@ public:
                           BoundNodesTreeBuilder *Builder,
                           bool Directly) override;
 
+private:
+  bool
+  classIsDerivedFromImpl(const CXXRecordDecl *Declaration,
+                         const Matcher<NamedDecl> &Base,
+                         BoundNodesTreeBuilder *Builder, bool Directly,
+                         llvm::SmallPtrSetImpl<const CXXRecordDecl *> &Visited);
+
+public:
   bool objcClassIsDerivedFrom(const ObjCInterfaceDecl *Declaration,
                               const Matcher<NamedDecl> &Base,
                               BoundNodesTreeBuilder *Builder,
                               bool Directly) override;
 
+public:
   // Implements ASTMatchFinder::matchesChildOf.
   bool matchesChildOf(const DynTypedNode &Node, ASTContext &Ctx,
                       const DynTypedMatcher &Matcher,
@@ -779,7 +792,7 @@ private:
 
 #define IMPL(Index)                                                            \
   template <typename NodeType>                                                 \
-  typename std::enable_if_t<                                                   \
+  std::enable_if_t<                                                            \
       llvm::is_one_of<const NodeType *, CMD_TYPES_##Index>::value>             \
   SetCallbackAndRawNode(const MatchCallback *CB, const NodeType &N) {          \
     assertEmpty();                                                             \
@@ -788,8 +801,8 @@ private:
   }                                                                            \
                                                                                \
   template <typename T>                                                        \
-  typename std::enable_if_t<                                                   \
-      llvm::is_one_of<const T *, CMD_TYPES_##Index>::value, const T *>         \
+  std::enable_if_t<llvm::is_one_of<const T *, CMD_TYPES_##Index>::value,       \
+                   const T *>                                                  \
   getNode() const {                                                            \
     assertHoldsState();                                                        \
     return Callback.getInt() == (Index) ? Node##Index.dyn_cast<const T *>()    \
@@ -979,7 +992,7 @@ private:
 
   class TimeBucketRegion {
   public:
-    TimeBucketRegion() : Bucket(nullptr) {}
+    TimeBucketRegion() = default;
     ~TimeBucketRegion() { setBucket(nullptr); }
 
     /// Start timing for \p NewBucket.
@@ -1002,7 +1015,7 @@ private:
     }
 
   private:
-    llvm::TimeRecord *Bucket;
+    llvm::TimeRecord *Bucket = nullptr;
   };
 
   /// Runs all the \p Matchers on \p Node.
@@ -1275,6 +1288,27 @@ private:
     auto Aliases = TypeAliases.find(CanonicalType);
     if (Aliases == TypeAliases.end())
       return false;
+
+    if (const auto *ElaboratedTypeNode =
+            llvm::dyn_cast<ElaboratedType>(TypeNode)) {
+      if (ElaboratedTypeNode->isSugared() && Aliases->second.size() > 1) {
+        const auto &DesugaredTypeName =
+            ElaboratedTypeNode->desugar().getAsString();
+
+        for (const TypedefNameDecl *Alias : Aliases->second) {
+          if (Alias->getName() != DesugaredTypeName) {
+            continue;
+          }
+
+          BoundNodesTreeBuilder Result(*Builder);
+          if (Matcher.matches(*Alias, this, &Result)) {
+            *Builder = std::move(Result);
+            return true;
+          }
+        }
+      }
+    }
+
     for (const TypedefNameDecl *Alias : Aliases->second) {
       BoundNodesTreeBuilder Result(*Builder);
       if (Matcher.matches(*Alias, this, &Result)) {
@@ -1317,7 +1351,7 @@ private:
   /// We precalculate a list of matchers that pass the toplevel restrict check.
   llvm::DenseMap<ASTNodeKind, std::vector<unsigned short>> MatcherFiltersMap;
 
-  const MatchFinder::MatchFinderOptions &Options;
+  const MatchFinderOptions &Options;
   ASTContext *ActiveASTContext;
 
   // Maps a canonical type to its TypedefDecls.
@@ -1361,7 +1395,17 @@ bool MatchASTVisitor::classIsDerivedFrom(const CXXRecordDecl *Declaration,
                                          const Matcher<NamedDecl> &Base,
                                          BoundNodesTreeBuilder *Builder,
                                          bool Directly) {
+  llvm::SmallPtrSet<const CXXRecordDecl *, 8> Visited;
+  return classIsDerivedFromImpl(Declaration, Base, Builder, Directly, Visited);
+}
+
+bool MatchASTVisitor::classIsDerivedFromImpl(
+    const CXXRecordDecl *Declaration, const Matcher<NamedDecl> &Base,
+    BoundNodesTreeBuilder *Builder, bool Directly,
+    llvm::SmallPtrSetImpl<const CXXRecordDecl *> &Visited) {
   if (!Declaration->hasDefinition())
+    return false;
+  if (!Visited.insert(Declaration).second)
     return false;
   for (const auto &It : Declaration->bases()) {
     const Type *TypeNode = It.getType().getTypePtr();
@@ -1384,7 +1428,8 @@ bool MatchASTVisitor::classIsDerivedFrom(const CXXRecordDecl *Declaration,
       *Builder = std::move(Result);
       return true;
     }
-    if (!Directly && classIsDerivedFrom(ClassDecl, Base, Builder, Directly))
+    if (!Directly &&
+        classIsDerivedFromImpl(ClassDecl, Base, Builder, Directly, Visited))
       return true;
   }
   return false;
@@ -1529,19 +1574,41 @@ bool MatchASTVisitor::TraverseAttr(Attr *AttrNode) {
 class MatchASTConsumer : public ASTConsumer {
 public:
   MatchASTConsumer(MatchFinder *Finder,
-                   MatchFinder::ParsingDoneTestCallback *ParsingDone)
-      : Finder(Finder), ParsingDone(ParsingDone) {}
+                   MatchFinder::ParsingDoneTestCallback *ParsingDone,
+                   const MatchFinderOptions &Options)
+      : Finder(Finder), ParsingDone(ParsingDone), Options(Options) {}
 
 private:
+  bool HandleTopLevelDecl(DeclGroupRef DG) override {
+    if (Options.SkipSystemHeaders) {
+      for (Decl *D : DG) {
+        if (!isInSystemHeader(D))
+          TraversalScope.push_back(D);
+      }
+    }
+    return true;
+  }
+
   void HandleTranslationUnit(ASTContext &Context) override {
+    if (!TraversalScope.empty())
+      Context.setTraversalScope(TraversalScope);
+
     if (ParsingDone != nullptr) {
       ParsingDone->run();
     }
     Finder->matchAST(Context);
   }
 
+  bool isInSystemHeader(Decl *D) {
+    const SourceManager &SM = D->getASTContext().getSourceManager();
+    const SourceLocation Loc = SM.getExpansionLoc(D->getBeginLoc());
+    return SM.isInSystemHeader(Loc);
+  }
+
   MatchFinder *Finder;
   MatchFinder::ParsingDoneTestCallback *ParsingDone;
+  const MatchFinderOptions &Options;
+  std::vector<Decl *> TraversalScope;
 };
 
 } // end namespace
@@ -1562,7 +1629,7 @@ MatchFinder::~MatchFinder() {}
 
 void MatchFinder::addMatcher(const DeclarationMatcher &NodeMatch,
                              MatchCallback *Action) {
-  llvm::Optional<TraversalKind> TK;
+  std::optional<TraversalKind> TK;
   if (Action)
     TK = Action->getCheckTraversalKind();
   if (TK)
@@ -1580,7 +1647,7 @@ void MatchFinder::addMatcher(const TypeMatcher &NodeMatch,
 
 void MatchFinder::addMatcher(const StatementMatcher &NodeMatch,
                              MatchCallback *Action) {
-  llvm::Optional<TraversalKind> TK;
+  std::optional<TraversalKind> TK;
   if (Action)
     TK = Action->getCheckTraversalKind();
   if (TK)
@@ -1660,7 +1727,8 @@ bool MatchFinder::addDynamicMatcher(const internal::DynTypedMatcher &NodeMatch,
 }
 
 std::unique_ptr<ASTConsumer> MatchFinder::newASTConsumer() {
-  return std::make_unique<internal::MatchASTConsumer>(this, ParsingDone);
+  return std::make_unique<internal::MatchASTConsumer>(this, ParsingDone,
+                                                      Options);
 }
 
 void MatchFinder::match(const clang::DynTypedNode &Node, ASTContext &Context) {
@@ -1685,9 +1753,9 @@ void MatchFinder::registerTestCallbackAfterParsing(
 
 StringRef MatchFinder::MatchCallback::getID() const { return "<unknown>"; }
 
-llvm::Optional<TraversalKind>
+std::optional<TraversalKind>
 MatchFinder::MatchCallback::getCheckTraversalKind() const {
-  return llvm::None;
+  return std::nullopt;
 }
 
 } // end namespace ast_matchers

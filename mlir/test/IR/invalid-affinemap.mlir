@@ -29,7 +29,7 @@
 #hello_world = affine_map<(i, j) [s0] -> (((s0 + (i + j) + 5), j)> // expected-error {{expected ')'}}
 
 // -----
- 
+
 // expected-error @+1 {{expected '(' in affine map range}}
 #hello_world = affine_map<(i, j) [s0] -> i + s0, j)>
 
@@ -106,3 +106,15 @@
 // -----
 #ABC = affine_map<(i,j) -> (i+j)>
 #ABC = affine_map<(i,j) -> (i+j)>  // expected-error {{redefinition of attribute alias id 'ABC'}}
+
+// -----
+
+#map = affine_map<(d0) -> (%)>  // expected-error {{invalid SSA name}}
+
+// -----
+
+func.func @invalid_affine_structure() {
+  %c0 = arith.constant 0 : index
+  %idx = affine.apply affine_map<(d0, d1)> (%c0, %c0) // expected-error {{expected '->' or ':'}}
+  return
+}

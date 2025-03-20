@@ -28,8 +28,8 @@
 #include "clang/StaticAnalyzer/Core/PathSensitive/SymExpr.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/SymbolManager.h"
 #include "llvm/ADT/ImmutableList.h"
-#include "llvm/ADT/Optional.h"
 #include <cstdint>
+#include <optional>
 
 namespace clang {
 
@@ -75,39 +75,6 @@ protected:
   /// The width of the scalar type used for array indices.
   const unsigned ArrayIndexWidth;
 
-  SVal evalCastKind(UndefinedVal V, QualType CastTy, QualType OriginalTy);
-  SVal evalCastKind(UnknownVal V, QualType CastTy, QualType OriginalTy);
-  SVal evalCastKind(Loc V, QualType CastTy, QualType OriginalTy);
-  SVal evalCastKind(NonLoc V, QualType CastTy, QualType OriginalTy);
-  SVal evalCastSubKind(loc::ConcreteInt V, QualType CastTy,
-                       QualType OriginalTy);
-  SVal evalCastSubKind(loc::GotoLabel V, QualType CastTy, QualType OriginalTy);
-  SVal evalCastSubKind(loc::MemRegionVal V, QualType CastTy,
-                       QualType OriginalTy);
-  SVal evalCastSubKind(nonloc::CompoundVal V, QualType CastTy,
-                       QualType OriginalTy);
-  SVal evalCastSubKind(nonloc::ConcreteInt V, QualType CastTy,
-                       QualType OriginalTy);
-  SVal evalCastSubKind(nonloc::LazyCompoundVal V, QualType CastTy,
-                       QualType OriginalTy);
-  SVal evalCastSubKind(nonloc::LocAsInteger V, QualType CastTy,
-                       QualType OriginalTy);
-  SVal evalCastSubKind(nonloc::SymbolVal V, QualType CastTy,
-                       QualType OriginalTy);
-  SVal evalCastSubKind(nonloc::PointerToMember V, QualType CastTy,
-                       QualType OriginalTy);
-  /// Reduce cast expression by removing redundant intermediate casts.
-  /// E.g.
-  /// - (char)(short)(int x) -> (char)(int x)
-  /// - (int)(int x) -> int x
-  ///
-  /// \param V -- SymbolVal, which pressumably contains SymbolCast or any symbol
-  /// that is applicable for cast operation.
-  /// \param CastTy -- QualType, which `V` shall be cast to.
-  /// \return SVal with simplified cast expression.
-  /// \note: Currently only support integral casts.
-  nonloc::SymbolVal simplifySymbolCast(nonloc::SymbolVal V, QualType CastTy);
-
 public:
   SValBuilder(llvm::BumpPtrAllocator &alloc, ASTContext &context,
               ProgramStateManager &stateMgr);
@@ -142,6 +109,18 @@ public:
   /// Evaluates a given SVal. If the SVal has only one possible (integer) value,
   /// that value is returned. Otherwise, returns NULL.
   virtual const llvm::APSInt *getKnownValue(ProgramStateRef state, SVal val) = 0;
+
+  /// Tries to get the minimal possible (integer) value of a given SVal. This
+  /// always returns the value of a ConcreteInt, but may return NULL if the
+  /// value is symbolic and the constraint manager cannot provide a useful
+  /// answer.
+  virtual const llvm::APSInt *getMinValue(ProgramStateRef state, SVal val) = 0;
+
+  /// Tries to get the maximal possible (integer) value of a given SVal. This
+  /// always returns the value of a ConcreteInt, but may return NULL if the
+  /// value is symbolic and the constraint manager cannot provide a useful
+  /// answer.
+  virtual const llvm::APSInt *getMaxValue(ProgramStateRef state, SVal val) = 0;
 
   /// Simplify symbolic expressions within a given SVal. Return an SVal
   /// that represents the same value, but is hopefully easier to work with
@@ -223,11 +202,9 @@ public:
                                         const Expr *expr,
                                         const LocationContext *LCtx,
                                         unsigned count);
-  DefinedOrUnknownSVal conjureSymbolVal(const void *symbolTag,
-                                        const Expr *expr,
+  DefinedOrUnknownSVal conjureSymbolVal(const void *symbolTag, const Stmt *S,
                                         const LocationContext *LCtx,
-                                        QualType type,
-                                        unsigned count);
+                                        QualType type, unsigned count);
   DefinedOrUnknownSVal conjureSymbolVal(const Stmt *stmt,
                                         const LocationContext *LCtx,
                                         QualType type,
@@ -236,17 +213,26 @@ public:
   /// Conjure a symbol representing heap allocated memory region.
   ///
   /// Note, the expression should represent a location.
-  DefinedOrUnknownSVal getConjuredHeapSymbolVal(const Expr *E,
-                                                const LocationContext *LCtx,
-                                                unsigned Count);
+  DefinedSVal getConjuredHeapSymbolVal(const Expr *E,
+                                       const LocationContext *LCtx,
+                                       unsigned Count);
 
   /// Conjure a symbol representing heap allocated memory region.
   ///
   /// Note, now, the expression *doesn't* need to represent a location.
   /// But the type need to!
-  DefinedOrUnknownSVal getConjuredHeapSymbolVal(const Expr *E,
-                                                const LocationContext *LCtx,
-                                                QualType type, unsigned Count);
+  DefinedSVal getConjuredHeapSymbolVal(const Expr *E,
+                                       const LocationContext *LCtx,
+                                       QualType type, unsigned Count);
+
+  /// Create an SVal representing the result of an alloca()-like call, that is,
+  /// an AllocaRegion on the stack.
+  ///
+  /// After calling this function, it's a good idea to set the extent of the
+  /// returned AllocaRegion.
+  loc::MemRegionVal getAllocaRegionVal(const Expr *E,
+                                       const LocationContext *LCtx,
+                                       unsigned Count);
 
   DefinedOrUnknownSVal getDerivedRegionValueSymbolVal(
       SymbolRef parentSymbol, const TypedValueRegion *region);
@@ -268,8 +254,8 @@ public:
   /// Returns the value of \p E, if it can be determined in a non-path-sensitive
   /// manner.
   ///
-  /// If \p E is not a constant or cannot be modeled, returns \c None.
-  Optional<SVal> getConstantVal(const Expr *E);
+  /// If \p E is not a constant or cannot be modeled, returns \c std::nullopt.
+  std::optional<SVal> getConstantVal(const Expr *E);
 
   NonLoc makeCompoundVal(QualType type, llvm::ImmutableList<SVal> vals) {
     return nonloc::CompoundVal(BasicVals.getCompoundValData(type, vals));
@@ -343,11 +329,10 @@ public:
   }
 
   nonloc::SymbolVal makeNonLoc(const SymExpr *lhs, BinaryOperator::Opcode op,
-                               const llvm::APSInt &rhs, QualType type);
+                               APSIntPtr rhs, QualType type);
 
-  nonloc::SymbolVal makeNonLoc(const llvm::APSInt &rhs,
-                               BinaryOperator::Opcode op, const SymExpr *lhs,
-                               QualType type);
+  nonloc::SymbolVal makeNonLoc(APSIntPtr rhs, BinaryOperator::Opcode op,
+                               const SymExpr *lhs, QualType type);
 
   nonloc::SymbolVal makeNonLoc(const SymExpr *lhs, BinaryOperator::Opcode op,
                                const SymExpr *rhs, QualType type);
@@ -402,9 +387,9 @@ public:
     return loc::ConcreteInt(BasicVals.getValue(integer));
   }
 
-  /// Return MemRegionVal on success cast, otherwise return None.
-  Optional<loc::MemRegionVal> getCastedMemRegionVal(const MemRegion *region,
-                                                    QualType type);
+  /// Return MemRegionVal on success cast, otherwise return std::nullopt.
+  std::optional<loc::MemRegionVal>
+  getCastedMemRegionVal(const MemRegion *region, QualType type);
 
   /// Make an SVal that represents the given symbol. This follows the convention
   /// of representing Loc-type symbols (symbolic pointers and references)

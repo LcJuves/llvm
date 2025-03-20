@@ -17,8 +17,7 @@ namespace {
 
 class TestClient : public GDBRemoteCommunication {
 public:
-  TestClient()
-      : GDBRemoteCommunication("test.client", "test.client.listener") {}
+  TestClient() : GDBRemoteCommunication() {}
 
   PacketResult ReadPacket(StringExtractorGDBRemote &response) {
     return GDBRemoteCommunication::ReadPacket(response, std::chrono::seconds(1),
@@ -39,7 +38,7 @@ protected:
 
   bool Write(llvm::StringRef packet) {
     ConnectionStatus status;
-    return server.Write(packet.data(), packet.size(), status, nullptr) ==
+    return server.WriteAll(packet.data(), packet.size(), status, nullptr) ==
            packet.size();
   }
 };
@@ -67,5 +66,28 @@ TEST_F(GDBRemoteCommunicationTest, ReadPacket) {
     ASSERT_EQ(PacketResult::Success, client.ReadPacket(response));
     ASSERT_EQ(Test.Payload, response.GetStringRef());
     ASSERT_EQ(PacketResult::Success, server.GetAck());
+  }
+}
+
+// Test that packets with incorrect RLE sequences do not cause a crash and
+// reported as invalid.
+TEST_F(GDBRemoteCommunicationTest, CheckForPacket) {
+  using PacketType = GDBRemoteCommunication::PacketType;
+  struct TestCase {
+    llvm::StringLiteral Packet;
+    PacketType Result;
+  };
+  static constexpr TestCase Tests[] = {
+      {{"$#00"}, PacketType::Standard},
+      {{"$xx*#00"}, PacketType::Invalid}, // '*' without a count
+      {{"$*#00"}, PacketType::Invalid},   // '*' without a preceding character
+      {{"$xx}#00"}, PacketType::Invalid}, // bare escape character '}'
+      {{"%#00"}, PacketType::Notify},     // a correct packet after an invalid
+  };
+  for (const auto &Test : Tests) {
+    SCOPED_TRACE(Test.Packet);
+    StringExtractorGDBRemote response;
+    EXPECT_EQ(Test.Result, client.CheckForPacket(Test.Packet.bytes_begin(),
+                                                 Test.Packet.size(), response));
   }
 }

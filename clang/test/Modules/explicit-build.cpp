@@ -161,7 +161,7 @@
 // RUN:            -fmodule-file=%t/not.pcm \
 // RUN:            %s 2>&1 | FileCheck --check-prefix=CHECK-BAD-FILE %s
 //
-// CHECK-BAD-FILE: fatal error: file '{{.*}}not.pcm' is not a valid precompiled module file
+// CHECK-BAD-FILE: fatal error: file '{{.*}}not.pcm' is not a valid precompiled module file: file too small to contain AST file magic
 
 // RUN: not %clang_cc1 -x c++ -std=c++11 -fmodules -fimplicit-module-maps -fmodules-cache-path=%t -Rmodule-build -fno-modules-error-recovery \
 // RUN:            -fmodule-file=%t/nonexistent.pcm \
@@ -199,6 +199,6 @@
 // RUN:            -fmodule-file=%t/c.pcm \
 // RUN:            %s -DHAVE_A -DHAVE_B -DHAVE_C 2>&1 | FileCheck --check-prefix=CHECK-MISMATCHED-B %s
 //
-// CHECK-MISMATCHED-B:      fatal error: module file '{{.*}}b.pcm' is out of date and needs to be rebuilt: module file out of date
+// CHECK-MISMATCHED-B:      fatal error: module file '{{.*}}b.pcm' is out of date and needs to be rebuilt: module file has a different size or mtime than expected
 // CHECK-MISMATCHED-B-NEXT: note: imported by module 'c'
 // CHECK-MISMATCHED-B-NOT:  note:

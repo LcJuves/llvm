@@ -4,12 +4,12 @@
 //
 // RUN: %clang_analyze_cc1 -std=c++14 -triple amdgcn-unknown-unknown \
 // RUN: -analyzer-checker=core,apiModeling.llvm.CastValue,debug.ExprInspection\
-// RUN:  -analyzer-config core.NullDereference:SuppressAddressSpaces=false\
+// RUN:  -analyzer-config suppress-dereferences-from-any-address-space=false\
 // RUN:  -analyzer-output=text -verify -DX86 -DNOT_SUPPRESSED %s 2>&1 | FileCheck %s -check-prefix=X86-CHECK
 //
 // RUN: %clang_analyze_cc1 -std=c++14 -triple amdgcn-unknown-unknown \
 // RUN: -analyzer-checker=core,apiModeling.llvm.CastValue,debug.ExprInspection\
-// RUN:  -analyzer-config core.NullDereference:SuppressAddressSpaces=true\
+// RUN:  -analyzer-config suppress-dereferences-from-any-address-space=true\
 // RUN:  -analyzer-output=text -verify -DX86 -DSUPPRESSED %s 2>&1 | FileCheck %s -check-prefix=X86-CHECK
 //
 // RUN: %clang_analyze_cc1 -std=c++14 -triple x86_64-unknown-unknown \
@@ -18,12 +18,12 @@
 //
 // RUN: %clang_analyze_cc1 -std=c++14 -triple x86_64-unknown-unknown \
 // RUN:  -analyzer-checker=core,apiModeling.llvm.CastValue,debug.ExprInspection\
-// RUN:  -analyzer-config core.NullDereference:SuppressAddressSpaces=true\
+// RUN:  -analyzer-config suppress-dereferences-from-any-address-space=true\
 // RUN:  -analyzer-output=text -verify -DX86 -DSUPPRESSED %s 2>&1 | FileCheck %s --check-prefix=X86-CHECK-SUPPRESSED
 //
 // RUN: %clang_analyze_cc1 -std=c++14 -triple x86_64-unknown-unknown \
 // RUN:  -analyzer-checker=core,apiModeling.llvm.CastValue,debug.ExprInspection\
-// RUN:  -analyzer-config core.NullDereference:SuppressAddressSpaces=false\
+// RUN:  -analyzer-config suppress-dereferences-from-any-address-space=false\
 // RUN:  -analyzer-output=text -verify -DX86 -DNOT_SUPPRESSED %s 2>&1 | FileCheck %s --check-prefix=X86-CHECK
 //
 // RUN: %clang_analyze_cc1 -std=c++14 -triple mips-unknown-unknown \
@@ -32,12 +32,12 @@
 //
 // RUN: %clang_analyze_cc1 -std=c++14 -triple mips-unknown-unknown \
 // RUN: -analyzer-checker=core,apiModeling.llvm.CastValue,debug.ExprInspection\
-// RUN: -analyzer-config core.NullDereference:SuppressAddressSpaces=false\
+// RUN: -analyzer-config suppress-dereferences-from-any-address-space=false\
 // RUN: -analyzer-output=text -verify -DMIPS %s 2>&1
 //
 // RUN: %clang_analyze_cc1 -std=c++14 -triple mips-unknown-unknown \
 // RUN: -analyzer-checker=core,apiModeling.llvm.CastValue,debug.ExprInspection\
-// RUN: -analyzer-config core.NullDereference:SuppressAddressSpaces=true\
+// RUN: -analyzer-config suppress-dereferences-from-any-address-space=true\
 // RUN: -analyzer-output=text -verify -DMIPS_SUPPRESSED %s
 
 #include "Inputs/llvm.h"
@@ -86,7 +86,7 @@ void evalReferences_addrspace(const Shape &S) {
   const auto &C = dyn_cast<DEVICE Circle>(S);
   clang_analyzer_printState();
   // X86-CHECK-SUPPRESSED: "dynamic_types": [
-  // X86-CHECK-SUPPRESSED-NEXT: { "region": "SymRegion{reg_$0<const struct clang::Shape & S>}", "dyn_type": "const __attribute__((address_space(3))) class clang::Circle &", "sub_classable": true }
+  // X86-CHECK-SUPPRESSED-NEXT: { "region": "SymRegion{reg_$0<const Shape & S>}", "dyn_type": "const __attribute__((address_space(3))) class clang::Circle &", "sub_classable": true }
   (void)C;
 }
 #endif
@@ -98,7 +98,7 @@ void evalReferences_addrspace(const Shape &S) {
   // expected-warning@-3 {{Dereference of null pointer}}
   clang_analyzer_printState();
   // X86-CHECK: "dynamic_types": [
-  // X86-CHECK-NEXT: { "region": "SymRegion{reg_$0<const struct clang::Shape & S>}", "dyn_type": "const __attribute__((address_space(3))) class clang::Circle &", "sub_classable": true }
+  // X86-CHECK-NEXT: { "region": "SymRegion{reg_$0<const Shape & S>}", "dyn_type": "const __attribute__((address_space(3))) class clang::Circle &", "sub_classable": true }
   (void)C;
 }
 #endif

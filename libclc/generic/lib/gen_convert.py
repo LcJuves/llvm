@@ -2,6 +2,7 @@
 #
 # Copyright (c) 2013 Victor Oliveira <victormatheus@gmail.com>
 # Copyright (c) 2013 Jesse Towner <jessetowner@lavabit.com>
+# Copyright (c) 2024 Romaric Jodin <rjodin@chromium.org>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -26,86 +27,176 @@
 #
 # convert_<destTypen><_sat><_roundingMode>(<sourceTypen>)
 
-types = ['char', 'uchar', 'short', 'ushort', 'int', 'uint', 'long', 'ulong', 'float', 'double']
-int_types = ['char', 'uchar', 'short', 'ushort', 'int', 'uint', 'long', 'ulong']
-unsigned_types = ['uchar', 'ushort', 'uint', 'ulong']
-float_types = ['float', 'double']
-int64_types = ['long', 'ulong']
-float64_types = ['double']
-vector_sizes = ['', '2', '3', '4', '8', '16']
-half_sizes = [('2',''), ('4','2'), ('8','4'), ('16','8')]
+import argparse
+from sys import stderr
 
-saturation = ['','_sat']
-rounding_modes = ['_rtz','_rte','_rtp','_rtn']
-float_prefix = {'float':'FLT_', 'double':'DBL_'}
-float_suffix = {'float':'f', 'double':''}
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--clc", action="store_true", help="Generate clc internal conversions"
+)
+parser.add_argument(
+    "--clspv", action="store_true", help="Generate the clspv variant of the code"
+)
+args = parser.parse_args()
 
-bool_type = {'char'  : 'char',
-             'uchar' : 'char',
-             'short' : 'short',
-             'ushort': 'short',
-             'int'   : 'int',
-             'uint'  : 'int',
-             'long'  : 'long',
-             'ulong' : 'long',
-             'float'  : 'int',
-             'double' : 'long'}
+clc = args.clc
+clspv = args.clspv
 
-unsigned_type = {'char'  : 'uchar',
-                 'uchar' : 'uchar',
-                 'short' : 'ushort',
-                 'ushort': 'ushort',
-                 'int'   : 'uint',
-                 'uint'  : 'uint',
-                 'long'  : 'ulong',
-                 'ulong' : 'ulong'}
 
-sizeof_type = {'char'  : 1, 'uchar'  : 1,
-               'short' : 2, 'ushort' : 2,
-               'int'   : 4, 'uint'   : 4,
-               'long'  : 8, 'ulong'  : 8,
-               'float' : 4, 'double' : 8}
+# We don't generate clspv-specific code for clc conversions - don't allow this
+# accidentally (later checks rely on mutual exclusivity)
+if clc and clspv:
+    print("Error: clc and clspv conversions are mutually exclusive", file=stderr)
+    exit(1)
 
-limit_max = {'char'  : 'CHAR_MAX',
-             'uchar' : 'UCHAR_MAX',
-             'short' : 'SHRT_MAX',
-             'ushort': 'USHRT_MAX',
-             'int'   : 'INT_MAX',
-             'uint'  : 'UINT_MAX',
-             'long'  : 'LONG_MAX',
-             'ulong' : 'ULONG_MAX'}
 
-limit_min = {'char'  : 'CHAR_MIN',
-             'uchar' : '0',
-             'short' : 'SHRT_MIN',
-             'ushort': '0',
-             'int'   : 'INT_MIN',
-             'uint'  : '0',
-             'long'  : 'LONG_MIN',
-             'ulong' : '0'}
+types = [
+    "char",
+    "uchar",
+    "short",
+    "ushort",
+    "int",
+    "uint",
+    "long",
+    "ulong",
+    "half",
+    "float",
+    "double",
+]
+int_types = ["char", "uchar", "short", "ushort", "int", "uint", "long", "ulong"]
+unsigned_types = ["uchar", "ushort", "uint", "ulong"]
+float_types = ["half", "float", "double"]
+int64_types = ["long", "ulong"]
+float64_types = ["double"]
+float16_types = ["half"]
+vector_sizes = ["", "2", "3", "4", "8", "16"]
+half_sizes = [("2", ""), ("4", "2"), ("8", "4"), ("16", "8")]
+
+saturation = ["", "_sat"]
+rounding_modes = ["_rtz", "_rte", "_rtp", "_rtn"]
+
+bool_type = {
+    "char": "char",
+    "uchar": "char",
+    "short": "short",
+    "ushort": "short",
+    "int": "int",
+    "uint": "int",
+    "long": "long",
+    "ulong": "long",
+    "half": "short",
+    "float": "int",
+    "double": "long",
+}
+
+unsigned_type = {
+    "char": "uchar",
+    "uchar": "uchar",
+    "short": "ushort",
+    "ushort": "ushort",
+    "int": "uint",
+    "uint": "uint",
+    "long": "ulong",
+    "ulong": "ulong",
+}
+
+sizeof_type = {
+    "char": 1,
+    "uchar": 1,
+    "short": 2,
+    "ushort": 2,
+    "int": 4,
+    "uint": 4,
+    "long": 8,
+    "ulong": 8,
+    "half": 2,
+    "float": 4,
+    "double": 8,
+}
+
+limit_max = {
+    "char": "CHAR_MAX",
+    "uchar": "UCHAR_MAX",
+    "short": "SHRT_MAX",
+    "ushort": "USHRT_MAX",
+    "int": "INT_MAX",
+    "uint": "UINT_MAX",
+    "long": "LONG_MAX",
+    "ulong": "ULONG_MAX",
+    "half": "0x1.ffcp+15",
+}
+
+limit_min = {
+    "char": "CHAR_MIN",
+    "uchar": "0",
+    "short": "SHRT_MIN",
+    "ushort": "0",
+    "int": "INT_MIN",
+    "uint": "0",
+    "long": "LONG_MIN",
+    "ulong": "0",
+    "half": "-0x1.ffcp+15",
+}
+
 
 def conditional_guard(src, dst):
-  int64_count = 0
-  float64_count = 0
-  if src in int64_types:
-    int64_count = int64_count +1
-  elif src in float64_types:
-    float64_count = float64_count + 1
-  if dst in int64_types:
-    int64_count = int64_count +1
-  elif dst in float64_types:
-    float64_count = float64_count + 1
-  if float64_count > 0:
-    #In embedded profile, if cl_khr_fp64 is supported cles_khr_int64 has to be
-    print("#ifdef cl_khr_fp64")
-    return True
-  elif int64_count > 0:
-    print("#if defined cles_khr_int64 || !defined(__EMBEDDED_PROFILE__)")
-    return True
-  return False
+    int64_count = 0
+    float64_count = 0
+    float16_count = 0
+    if src in int64_types:
+        int64_count = int64_count + 1
+    elif src in float64_types:
+        float64_count = float64_count + 1
+    elif src in float16_types:
+        float16_count = float16_count + 1
+    if dst in int64_types:
+        int64_count = int64_count + 1
+    elif dst in float64_types:
+        float64_count = float64_count + 1
+    elif dst in float16_types:
+        float16_count = float16_count + 1
+    if float64_count > 0 and float16_count > 0:
+        print("#if defined(cl_khr_fp16) && defined(cl_khr_fp64)")
+        return True
+    elif float64_count > 0:
+        # In embedded profile, if cl_khr_fp64 is supported cles_khr_int64 has to be
+        print("#ifdef cl_khr_fp64")
+        return True
+    elif float16_count > 0:
+        print("#if defined cl_khr_fp16")
+        return True
+    elif int64_count > 0:
+        print("#if defined cles_khr_int64 || !defined(__EMBEDDED_PROFILE__)")
+        return True
+    return False
 
 
-print("""/* !!!! AUTOGENERATED FILE generated by convert_type.py !!!!!
+nl = "\n"
+includes = []
+if not clc:
+    includes = ["<clc/clc.h>"]
+else:
+    includes = sorted(
+        [
+            "<clc/internal/clc.h>",
+            "<clc/integer/definitions.h>",
+            "<clc/float/definitions.h>",
+            "<clc/integer/clc_abs.h>",
+            "<clc/common/clc_sign.h>",
+            "<clc/shared/clc_clamp.h>",
+            "<clc/shared/clc_min.h>",
+            "<clc/shared/clc_max.h>",
+            "<clc/math/clc_fabs.h>",
+            "<clc/math/clc_rint.h>",
+            "<clc/math/clc_ceil.h>",
+            "<clc/math/clc_floor.h>",
+            "<clc/math/clc_nextafter.h>",
+            "<clc/relational/clc_select.h>",
+        ]
+    )
+
+print(
+    f"""/* !!!! AUTOGENERATED FILE generated by convert_type.py !!!!!
 
    DON'T CHANGE THIS FILE. MAKE YOUR CHANGES TO convert_type.py AND RUN:
    $ ./generate-conversion-type-cl.sh
@@ -134,7 +225,12 @@ print("""/* !!!! AUTOGENERATED FILE generated by convert_type.py !!!!!
    THE SOFTWARE.
 */
 
-#include <clc/clc.h>
+{nl.join(['#include ' + f for f in includes])}
+#include <clc/clc_convert.h>
+
+#ifdef cl_khr_fp16
+#pragma OPENCL EXTENSION cl_khr_fp16 : enable
+#endif
 
 #ifdef cl_khr_fp64
 #pragma OPENCL EXTENSION cl_khr_fp64 : enable
@@ -149,7 +245,9 @@ print("""/* !!!! AUTOGENERATED FILE generated by convert_type.py !!!!!
 #pragma OPENCL EXTENSION cles_khr_int64 : enable
 #endif
 
-""")
+"""
+)
+
 
 #
 # Default Conversions
@@ -177,50 +275,66 @@ print("""/* !!!! AUTOGENERATED FILE generated by convert_type.py !!!!!
 # even for integer-to-integer conversions. When such a conversion
 # is used, the rounding mode is ignored.
 #
+def print_passthru_conversion(src_ty, dst_ty, fn_name):
+    print(
+        f"""_CLC_DEF _CLC_OVERLOAD {dst_ty} {fn_name}({src_ty} x) {{
+  return __clc_{fn_name}(x);
+}}
+"""
+    )
+
 
 def generate_default_conversion(src, dst, mode):
-  close_conditional = conditional_guard(src, dst)
+    close_conditional = conditional_guard(src, dst)
 
-  # scalar conversions
-  print("""_CLC_DEF _CLC_OVERLOAD
-{DST} convert_{DST}{M}({SRC} x)
-{{
-  return ({DST})x;
+    for size in vector_sizes:
+        if not size:
+            if clc:
+                print(
+                    f"""_CLC_DEF _CLC_OVERLOAD {dst} __clc_convert_{dst}{mode}({src} x) {{
+  return ({dst})x;
 }}
-""".format(SRC=src, DST=dst, M=mode))
-
-  # vector conversions, done through decomposition to components
-  for size, half_size in half_sizes:
-    print("""_CLC_DEF _CLC_OVERLOAD
-{DST}{N} convert_{DST}{N}{M}({SRC}{N} x)
-{{
-  return ({DST}{N})(convert_{DST}{H}(x.lo), convert_{DST}{H}(x.hi));
+"""
+                )
+            else:
+                print_passthru_conversion(src, dst, f"convert_{dst}{mode}")
+        else:
+            if clc:
+                print(
+                    f"""_CLC_DEF _CLC_OVERLOAD {dst}{size} __clc_convert_{dst}{size}{mode}({src}{size} x) {{
+  return __builtin_convertvector(x, {dst}{size});
 }}
-""".format(SRC=src, DST=dst, N=size, H=half_size, M=mode))
+"""
+                )
+            else:
+                print_passthru_conversion(
+                    f"{src}{size}", f"{dst}{size}", f"convert_{dst}{size}{mode}"
+                )
 
-  # 3-component vector conversions
-  print("""_CLC_DEF _CLC_OVERLOAD
-{DST}3 convert_{DST}3{M}({SRC}3 x)
-{{
-  return ({DST}3)(convert_{DST}2(x.s01), convert_{DST}(x.s2));
-}}""".format(SRC=src, DST=dst, M=mode))
-
-  if close_conditional:
-    print("#endif")
+    if close_conditional:
+        print("#endif")
 
 
-for src in types:
-  for dst in types:
-    generate_default_conversion(src, dst, '')
+# Do not generate user-facing default conversions for clspv as they are handled
+# natively
+if not clspv:
+    for src in types:
+        for dst in types:
+            generate_default_conversion(src, dst, "")
 
 for src in int_types:
-  for dst in int_types:
-    for mode in rounding_modes:
-      generate_default_conversion(src, dst, mode)
+    for dst in int_types:
+        for mode in rounding_modes:
+            # Do not generate user-facing "_rte" conversions for clspv as they
+            # are handled natively
+            if clspv and mode == "_rte":
+                continue
+            generate_default_conversion(src, dst, mode)
 
 #
 # Saturated Conversions To Integers
-#
+
+
 # These functions are dependent on the unsaturated conversion functions
 # generated above, and use clamp, max, min, and select to eliminate
 # branching and vectorize the conversions.
@@ -228,98 +342,112 @@ for src in int_types:
 # Again, as above, we allow all rounding modes for integer-to-integer
 # conversions with saturation.
 #
-
 def generate_saturated_conversion(src, dst, size):
-  # Header
-  close_conditional = conditional_guard(src, dst)
-  print("""_CLC_DEF _CLC_OVERLOAD
-{DST}{N} convert_{DST}{N}_sat({SRC}{N} x)
-{{""".format(DST=dst, SRC=src, N=size))
+    # Header
+    close_conditional = conditional_guard(src, dst)
 
-  # FIXME: This is a work around for lack of select function with
-  # signed third argument when the first two arguments are unsigned types.
-  # We cast to the signed type for sign-extension, then do a bitcast to
-  # the unsigned type.
-  if dst in unsigned_types:
-    bool_prefix = "as_{DST}{N}(convert_{BOOL}{N}".format(DST=dst, BOOL=bool_type[dst], N=size);
-    bool_suffix = ")"
-  else:
-    bool_prefix = "convert_{BOOL}{N}".format(BOOL=bool_type[dst], N=size);
-    bool_suffix = ""
+    dstn = f"{dst}{size}"
+    srcn = f"{src}{size}"
 
-  # Body
-  if src == dst:
+    if not clc:
+        print_passthru_conversion(f"{srcn}", f"{dstn}", f"convert_{dstn}_sat")
+        if close_conditional:
+            print("#endif")
+        return
 
-    # Conversion between same types
-    print("  return x;")
+    print(f"_CLC_DEF _CLC_OVERLOAD {dstn} __clc_convert_{dstn}_sat({srcn} x) {{")
 
-  elif src in float_types:
+    # FIXME: This is a work around for lack of select function with signed
+    # third argument when the first two arguments are unsigned types. We cast
+    # to the signed type for sign-extension, then do a bitcast to the unsigned
+    # type.
+    if dst in unsigned_types:
+        bool_prefix = f"__clc_as_{dstn}(__clc_convert_{bool_type[dst]}{size}"
+        bool_suffix = ")"
+    else:
+        bool_prefix = f"__clc_convert_{bool_type[dst]}{size}"
+        bool_suffix = ""
 
-    # Conversion from float to int
-    print("""  {DST}{N} y = convert_{DST}{N}(x);
-  y = select(y, ({DST}{N}){DST_MIN}, {BP}(x < ({SRC}{N}){DST_MIN}){BS});
-  y = select(y, ({DST}{N}){DST_MAX}, {BP}(x > ({SRC}{N}){DST_MAX}){BS});
-  return y;""".format(SRC=src, DST=dst, N=size,
-      DST_MIN=limit_min[dst], DST_MAX=limit_max[dst],
-      BP=bool_prefix, BS=bool_suffix))
+    dst_max = limit_max[dst]
+    dst_min = limit_min[dst]
 
-  else:
+    # Body
+    if src == dst:
+        # Conversion between same types
+        print("  return x;")
 
-    # Integer to integer convesion with sizeof(src) == sizeof(dst)
-    if sizeof_type[src] == sizeof_type[dst]:
-      if src in unsigned_types:
-        print("  x = min(x, ({SRC}){DST_MAX});".format(SRC=src, DST_MAX=limit_max[dst]))
-      else:
-        print("  x = max(x, ({SRC})0);".format(SRC=src))
+    elif src in float_types:
 
-    # Integer to integer conversion where sizeof(src) > sizeof(dst)
-    elif sizeof_type[src] > sizeof_type[dst]:
-      if src in unsigned_types:
-        print("  x = min(x, ({SRC}){DST_MAX});".format(SRC=src, DST_MAX=limit_max[dst]))
-      else:
-        print("  x = clamp(x, ({SRC}){DST_MIN}, ({SRC}){DST_MAX});"
-          .format(SRC=src, DST_MIN=limit_min[dst], DST_MAX=limit_max[dst]))
+        # Conversion from float to int
+        print(
+            f"""  {dstn} y = __clc_convert_{dstn}(x);
+  y = __clc_select(y, ({dstn}){dst_min}, {bool_prefix}(x <= ({srcn}){dst_min}){bool_suffix});
+  y = __clc_select(y, ({dstn}){dst_max}, {bool_prefix}(x >= ({srcn}){dst_max}){bool_suffix});
+  return y;"""
+        )
+    else:
 
-    # Integer to integer conversion where sizeof(src) < sizeof(dst)
-    elif src not in unsigned_types and dst in unsigned_types:
-        print("  x = max(x, ({SRC})0);".format(SRC=src))
+        # Integer to integer convesion with sizeof(src) == sizeof(dst)
+        if sizeof_type[src] == sizeof_type[dst]:
+            if src in unsigned_types:
+                print(f"  x = __clc_min(x, ({src}){dst_max});")
+            else:
+                print(f"  x = __clc_max(x, ({src})0);")
 
-    print("  return convert_{DST}{N}(x);".format(DST=dst, N=size))
+        # Integer to integer conversion where sizeof(src) > sizeof(dst)
+        elif sizeof_type[src] > sizeof_type[dst]:
+            if src in unsigned_types:
+                print(f"  x = __clc_min(x, ({src}){dst_max});")
+            else:
+                print(f"  x = __clc_clamp(x, ({src}){dst_min}, ({src}){dst_max});")
 
-  # Footer
-  print("}")
-  if close_conditional:
-    print("#endif")
+        # Integer to integer conversion where sizeof(src) < sizeof(dst)
+        elif src not in unsigned_types and dst in unsigned_types:
+            print(f"  x = __clc_max(x, ({src})0);")
+
+        print(f"  return __clc_convert_{dstn}(x);")
+
+    # Footer
+    print("}")
+    if close_conditional:
+        print("#endif")
 
 
 for src in types:
-  for dst in int_types:
-    for size in vector_sizes:
-      generate_saturated_conversion(src, dst, size)
+    for dst in int_types:
+        for size in vector_sizes:
+            generate_saturated_conversion(src, dst, size)
 
 
 def generate_saturated_conversion_with_rounding(src, dst, size, mode):
-  # Header
-  close_conditional = conditional_guard(src, dst)
+    # Header
+    close_conditional = conditional_guard(src, dst)
 
-  # Body
-  print("""_CLC_DEF _CLC_OVERLOAD
-{DST}{N} convert_{DST}{N}_sat{M}({SRC}{N} x)
-{{
-  return convert_{DST}{N}_sat(x);
+    dstn = f"{dst}{size}"
+    srcn = f"{src}{size}"
+
+    if not clc:
+        print_passthru_conversion(f"{srcn}", f"{dstn}", f"convert_{dstn}_sat{mode}")
+    else:
+        # Body
+        print(
+            f"""_CLC_DEF _CLC_OVERLOAD {dstn} __clc_convert_{dstn}_sat{mode}({srcn} x) {{
+  return __clc_convert_{dstn}_sat(x);
 }}
-""".format(DST=dst, SRC=src, N=size, M=mode))
+"""
+        )
 
-  # Footer
-  if close_conditional:
-    print("#endif")
+    # Footer
+    if close_conditional:
+        print("#endif")
 
 
 for src in int_types:
-  for dst in int_types:
-    for size in vector_sizes:
-      for mode in rounding_modes:
-        generate_saturated_conversion_with_rounding(src, dst, size, mode)
+    for dst in int_types:
+        for size in vector_sizes:
+            for mode in rounding_modes:
+                generate_saturated_conversion_with_rounding(src, dst, size, mode)
+
 
 #
 # Conversions To/From Floating-Point With Rounding
@@ -334,60 +462,113 @@ for src in int_types:
 #
 # Only conversions to integers can have saturation.
 #
-
 def generate_float_conversion(src, dst, size, mode, sat):
-  # Header
-  close_conditional = conditional_guard(src, dst)
-  print("""_CLC_DEF _CLC_OVERLOAD
-{DST}{N} convert_{DST}{N}{S}{M}({SRC}{N} x)
-{{""".format(SRC=src, DST=dst, N=size, M=mode, S=sat))
+    # Header
+    close_conditional = conditional_guard(src, dst)
 
-  # Perform conversion
-  if dst in int_types:
-    if mode == '_rte':
-      print("  x = rint(x);");
-    elif mode == '_rtp':
-      print("  x = ceil(x);");
-    elif mode == '_rtn':
-      print("  x = floor(x);");
-    print("  return convert_{DST}{N}{S}(x);".format(DST=dst, N=size, S=sat))
-  elif mode == '_rte':
-    print("  return convert_{DST}{N}(x);".format(DST=dst, N=size))
-  else:
-    print("  {DST}{N} r = convert_{DST}{N}(x);".format(DST=dst, N=size))
-    print("  {SRC}{N} y = convert_{SRC}{N}(r);".format(SRC=src, N=size))
-    if mode == '_rtz':
-      if src in int_types:
-        print("  {USRC}{N} abs_x = abs(x);".format(USRC=unsigned_type[src], N=size))
-        print("  {USRC}{N} abs_y = abs(y);".format(USRC=unsigned_type[src], N=size))
-      else:
-        print("  {SRC}{N} abs_x = fabs(x);".format(SRC=src, N=size))
-        print("  {SRC}{N} abs_y = fabs(y);".format(SRC=src, N=size))
-      print("  return select(r, nextafter(r, sign(r) * ({DST}{N})-INFINITY), convert_{BOOL}{N}(abs_y > abs_x));"
-        .format(DST=dst, N=size, BOOL=bool_type[dst]))
-    if mode == '_rtp':
-      print("  return select(r, nextafter(r, ({DST}{N})INFINITY), convert_{BOOL}{N}(y < x));"
-        .format(DST=dst, N=size, BOOL=bool_type[dst]))
-    if mode == '_rtn':
-      print("  return select(r, nextafter(r, ({DST}{N})-INFINITY), convert_{BOOL}{N}(y > x));"
-        .format(DST=dst, N=size, BOOL=bool_type[dst]))
+    dstn = f"{dst}{size}"
+    srcn = f"{src}{size}"
+    booln = f"{bool_type[dst]}{size}"
+    src_max = limit_max[src] if src in limit_max else ""
+    dst_min = limit_min[dst] if dst in limit_min else ""
 
-  # Footer
-  print("}")
-  if close_conditional:
-    print("#endif")
+    if not clc:
+        print_passthru_conversion(f"{srcn}", f"{dstn}", f"convert_{dstn}{sat}{mode}")
+        # Footer
+        if close_conditional:
+            print("#endif")
+        return
+
+    print(f"_CLC_DEF _CLC_OVERLOAD {dstn} __clc_convert_{dstn}{sat}{mode}({srcn} x) {{")
+
+    # Perform conversion
+    if dst in int_types:
+        if mode == "_rte":
+            print("  x = __clc_rint(x);")
+        elif mode == "_rtp":
+            print("  x = __clc_ceil(x);")
+        elif mode == "_rtn":
+            print("  x = __clc_floor(x);")
+        print(f"  return __clc_convert_{dstn}{sat}(x);")
+    elif mode == "_rte":
+        print(f"  return __clc_convert_{dstn}(x);")
+    else:
+        print(f"  {dstn} r = __clc_convert_{dstn}(x);")
+        if src in int_types:
+            print(f"  {srcn} y = __clc_convert_{srcn}_sat(r);")
+        else:
+            print(f"  {srcn} y = __clc_convert_{srcn}(r);")
+        if mode == "_rtz":
+            if src in int_types:
+                usrcn = f"{unsigned_type[src]}{size}"
+                print(f"  {usrcn} abs_x = __clc_abs(x);")
+                print(f"  {usrcn} abs_y = __clc_abs(y);")
+            else:
+                print(f"  {srcn} abs_x = __clc_fabs(x);")
+                print(f"  {srcn} abs_y = __clc_fabs(y);")
+            print(f"  {booln} c = __clc_convert_{booln}(abs_y > abs_x);")
+            if sizeof_type[src] >= sizeof_type[dst] and src in int_types:
+                print(f"  c = c || __clc_convert_{booln}(({srcn}){src_max} == x);")
+            print(
+                f"  {dstn} sel = __clc_select(r, __clc_nextafter(r, __clc_sign(r) * ({dstn})-INFINITY), c);"
+            )
+            if dst == "half" and src in int_types and sizeof_type[src] >= 2:
+                dst_max = limit_max[dst]
+                # short is 16 bits signed, so the maximum value rounded to zero
+                # is 0x1.ffcp+14 (0x1p+15 == 32768 > 0x7fff == 32767)
+                if src == "short":
+                    dst_max = "0x1.ffcp+14"
+                print(
+                    f"  return __clc_clamp(sel, ({dstn}){dst_min}, ({dstn}){dst_max});"
+                )
+            else:
+                print("  return sel;")
+        if mode == "_rtp":
+            print(
+                f"  {dstn} sel = __clc_select(r, __clc_nextafter(r, ({dstn})INFINITY), __clc_convert_{booln}(y < x));"
+            )
+            if dst == "half" and src in int_types and sizeof_type[src] >= 2:
+                print(f"  return __clc_max(sel, ({dstn}){dst_min});")
+            else:
+                print("  return sel;")
+        if mode == "_rtn":
+            print(f"  {booln} c = __clc_convert_{booln}(y > x);")
+            if sizeof_type[src] >= sizeof_type[dst] and src in int_types:
+                print(f"  c = c || __clc_convert_{booln}(({srcn}){src_max} == x);")
+            print(
+                f"  {dstn} sel = __clc_select(r, __clc_nextafter(r, ({dstn})-INFINITY), c);"
+            )
+            if dst == "half" and src in int_types and sizeof_type[src] >= 2:
+                dst_max = limit_max[dst]
+                # short is 16 bits signed, so the maximum value rounded to
+                # negative infinity is 0x1.ffcp+14 (0x1p+15 == 32768 > 0x7fff
+                # == 32767)
+                if src == "short":
+                    dst_max = "0x1.ffcp+14"
+                print(f"  return __clc_min(sel, ({dstn}){dst_max});")
+            else:
+                print("  return sel;")
+
+    # Footer
+    print("}")
+    if close_conditional:
+        print("#endif")
 
 
 for src in float_types:
-  for dst in int_types:
-    for size in vector_sizes:
-      for mode in rounding_modes:
-        for sat in saturation:
-          generate_float_conversion(src, dst, size, mode, sat)
+    for dst in int_types:
+        for size in vector_sizes:
+            for mode in rounding_modes:
+                for sat in saturation:
+                    generate_float_conversion(src, dst, size, mode, sat)
 
 
 for src in types:
-  for dst in float_types:
-    for size in vector_sizes:
-      for mode in rounding_modes:
-        generate_float_conversion(src, dst, size, mode, '')
+    for dst in float_types:
+        for size in vector_sizes:
+            for mode in rounding_modes:
+                # Do not generate user-facing "_rte" conversions for clspv as
+                # they are handled natively
+                if clspv and mode == "_rte":
+                    continue
+                generate_float_conversion(src, dst, size, mode, "")

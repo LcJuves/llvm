@@ -13,11 +13,13 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/IR/DataLayout.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/GlobalVariable.h"
-#include "llvm/IR/Function.h"
 
 namespace llvm {
+
+class AMDGPUSubtarget;
 
 class AMDGPUMachineFunction : public MachineFunctionInfo {
   /// A map to keep track of local memory objects and their offsets within the
@@ -44,8 +46,8 @@ protected:
   /// stages.
   Align DynLDSAlign;
 
-  // State of MODE register, assumed FP mode.
-  AMDGPU::SIModeRegisterDefaults Mode;
+  // Flag to check dynamic LDS usage by kernel.
+  bool UsesDynamicLDS = false;
 
   // Kernels + shaders. i.e. functions called by the hardware and not called
   // by other functions.
@@ -53,6 +55,9 @@ protected:
 
   // Entry points called by other functions instead of directly by the hardware.
   bool IsModuleEntryFunction = false;
+
+  // Functions with the amdgpu_cs_chain or amdgpu_cs_chain_preserve CC.
+  bool IsChainFunction = false;
 
   bool NoSignedZerosFPMath = false;
 
@@ -62,8 +67,10 @@ protected:
   // Kernel may need limited waves per EU for better performance.
   bool WaveLimiter = false;
 
+  bool HasInitWholeWave = false;
+
 public:
-  AMDGPUMachineFunction(const MachineFunction &MF);
+  AMDGPUMachineFunction(const Function &F, const AMDGPUSubtarget &ST);
 
   uint64_t getExplicitKernArgSize() const {
     return ExplicitKernArgSize;
@@ -79,15 +86,18 @@ public:
     return GDSSize;
   }
 
-  AMDGPU::SIModeRegisterDefaults getMode() const {
-    return Mode;
-  }
-
   bool isEntryFunction() const {
     return IsEntryFunction;
   }
 
   bool isModuleEntryFunction() const { return IsModuleEntryFunction; }
+
+  bool isChainFunction() const { return IsChainFunction; }
+
+  // The stack is empty upon entry to this function.
+  bool isBottomOfStack() const {
+    return isEntryFunction() || isChainFunction();
+  }
 
   bool hasNoSignedZerosFPMath() const {
     return NoSignedZerosFPMath;
@@ -101,12 +111,26 @@ public:
     return WaveLimiter;
   }
 
-  unsigned allocateLDSGlobal(const DataLayout &DL, const GlobalVariable &GV);
-  void allocateModuleLDSGlobal(const Function &F);
+  bool hasInitWholeWave() const { return HasInitWholeWave; }
+  void setInitWholeWave() { HasInitWholeWave = true; }
+
+  unsigned allocateLDSGlobal(const DataLayout &DL, const GlobalVariable &GV) {
+    return allocateLDSGlobal(DL, GV, DynLDSAlign);
+  }
+
+  unsigned allocateLDSGlobal(const DataLayout &DL, const GlobalVariable &GV,
+                             Align Trailing);
+
+  static std::optional<uint32_t> getLDSKernelIdMetadata(const Function &F);
+  static std::optional<uint32_t> getLDSAbsoluteAddress(const GlobalValue &GV);
 
   Align getDynLDSAlign() const { return DynLDSAlign; }
 
-  void setDynLDSAlign(const DataLayout &DL, const GlobalVariable &GV);
+  void setDynLDSAlign(const Function &F, const GlobalVariable &GV);
+
+  void setUsesDynamicLDS(bool DynLDS);
+
+  bool isDynamicLDSUsed() const;
 };
 
 }

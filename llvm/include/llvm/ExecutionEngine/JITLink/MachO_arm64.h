@@ -23,8 +23,8 @@ namespace jitlink {
 /// Note: The graph does not take ownership of the underlying buffer, nor copy
 /// its contents. The caller is responsible for ensuring that the object buffer
 /// outlives the graph.
-Expected<std::unique_ptr<LinkGraph>>
-createLinkGraphFromMachOObject_arm64(MemoryBufferRef ObjectBuffer);
+Expected<std::unique_ptr<LinkGraph>> createLinkGraphFromMachOObject_arm64(
+    MemoryBufferRef ObjectBuffer, std::shared_ptr<orc::SymbolStringPool> SSP);
 
 /// jit-link the given object buffer, which must be a MachO arm64 object file.
 ///
@@ -37,6 +37,14 @@ createLinkGraphFromMachOObject_arm64(MemoryBufferRef ObjectBuffer);
 /// for including a pass to insert GOT and stub edges.
 void link_MachO_arm64(std::unique_ptr<LinkGraph> G,
                       std::unique_ptr<JITLinkContext> Ctx);
+
+/// Returns a pass suitable for splitting __eh_frame sections in MachO/x86-64
+/// objects.
+LinkGraphPassFunction createEHFrameSplitterPass_MachO_arm64();
+
+/// Returns a pass suitable for fixing missing edges in an __eh_frame section
+/// in a MachO/x86-64 object.
+LinkGraphPassFunction createEHFrameEdgeFixerPass_MachO_arm64();
 
 } // end namespace jitlink
 } // end namespace llvm

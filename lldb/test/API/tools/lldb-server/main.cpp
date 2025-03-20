@@ -128,6 +128,15 @@ static void swap_chars() {
                :
                : "r"('0'), "r"('1'), "r"(&g_c1), "r"(&g_c2)
                : "memory");
+#elif defined(__riscv)
+  asm volatile("sb %1, (%2)\n\t"
+               "sb %0, (%3)\n\t"
+               "sb %0, (%2)\n\t"
+               "sb %1, (%3)\n\t"
+               :
+               : "r"('0'), "r"('1'), "r"(&g_c1), "r"(&g_c2)
+               : "memory");
+
 #else
 #warning This may generate unpredictible assembly and cause the single-stepping test to fail.
 #warning Please add appropriate assembly for your target.
@@ -148,7 +157,7 @@ static void trap() {
   asm volatile("udf #254");
 #elif defined(__powerpc__)
   asm volatile("trap");
-#elif __has_builtin(__builtin_debugtrap())
+#elif __has_builtin(__builtin_debugtrap)
   __builtin_debugtrap();
 #else
 #warning Don't know how to generate a trap. Some tests may fail.
@@ -224,6 +233,8 @@ int main(int argc, char **argv) {
   int return_value = 0;
 
 #if !defined(_WIN32)
+  bool is_child = false;
+
   // Set the signal handler.
   sig_t sig_result = signal(SIGALRM, signal_handler);
   if (sig_result == SIG_ERR) {
@@ -324,10 +335,32 @@ int main(int argc, char **argv) {
       func_p();
 #if !defined(_WIN32) && !defined(TARGET_OS_WATCH) && !defined(TARGET_OS_TV)
     } else if (arg == "fork") {
-      assert (fork() != -1);
+      pid_t fork_pid = fork();
+      assert(fork_pid != -1);
+      is_child = fork_pid == 0;
     } else if (arg == "vfork") {
       if (vfork() == 0)
         _exit(0);
+    } else if (consume_front(arg, "process:sync:")) {
+      // this is only valid after fork
+      const char *filenames[] = {"parent", "child"};
+      std::string my_file = arg + "." + filenames[is_child];
+      std::string other_file = arg + "." + filenames[!is_child];
+
+      // indicate that we're ready
+      FILE *f = fopen(my_file.c_str(), "w");
+      assert(f);
+      fclose(f);
+
+      // wait for the other process to be ready
+      for (int i = 0; i < 5; ++i) {
+        f = fopen(other_file.c_str(), "r");
+        if (f)
+          break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(125 * (1<<i)));
+      }
+      assert(f);
+      fclose(f);
 #endif
     } else if (consume_front(arg, "thread:new")) {
       std::promise<void> promise;
@@ -355,7 +388,7 @@ int main(int argc, char **argv) {
       trap();
 #if !defined(_WIN32)
     } else if (arg == "stop") {
-      raise(SIGSTOP);
+      raise(SIGINT);
 #endif
     } else {
       // Treat the argument as text for stdout.

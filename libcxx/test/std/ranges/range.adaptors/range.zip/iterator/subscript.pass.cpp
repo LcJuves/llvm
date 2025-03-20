@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03, c++11, c++14, c++17, c++20
-// UNSUPPORTED: libcpp-has-no-incomplete-ranges
 
 // constexpr auto operator[](difference_type n) const requires
 //        all_random_access<Const, Views...>
@@ -28,7 +27,7 @@ constexpr bool test() {
     assert(it[2] == *(it + 2));
     assert(it[4] == *(it + 4));
 
-    static_assert(std::is_same_v<decltype(it[2]), std::pair<int&, int>>);
+    static_assert(std::is_same_v<decltype(it[2]), std::tuple<int&, int>>);
   }
 
   {
@@ -39,7 +38,7 @@ constexpr bool test() {
     assert(it[2] == *(it + 2));
     assert(it[4] == *(it + 4));
 
-    static_assert(std::is_same_v<decltype(it[2]), std::pair<int&, int&>>);
+    static_assert(std::is_same_v<decltype(it[2]), std::tuple<int&, int&>>);
   }
 
   {

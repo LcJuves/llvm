@@ -1,4 +1,4 @@
-// RUN: mlir-opt -allow-unregistered-dialect %s -pass-pipeline="func.func(sccp)" -split-input-file | FileCheck %s
+// RUN: mlir-opt -allow-unregistered-dialect %s -pass-pipeline="builtin.module(func.func(sccp))" -split-input-file | FileCheck %s
 
 /// Check simple forward constant propagation without any control flow.
 
@@ -204,7 +204,7 @@ func.func @simple_produced_operand() -> (i32, i32) {
   // CHECK: %[[ONE:.*]] = arith.constant 1
   %1 = arith.constant 1 : i32
   "test.internal_br"(%1) [^bb1, ^bb2] {
-    operand_segment_sizes = dense<[0, 1]> : vector<2 x i32>
+    operandSegmentSizes = array<i32: 0, 1>
   } : (i32) -> ()
 
 ^bb1:
@@ -215,4 +215,43 @@ func.func @simple_produced_operand() -> (i32, i32) {
   // CHECK: return %[[ARG]], %[[ONE]] : i32, i32
 
   return %arg1, %arg2 : i32, i32
+}
+
+// CHECK-LABEL: inplace_fold
+func.func @inplace_fold() -> (i32) {
+  %0 = "test.op_in_place_fold_success"() : () -> i1
+  %1 = arith.constant 5 : i32
+  cf.cond_br %0, ^a, ^b
+
+^a:
+  // CHECK-NOT: addi
+  %3 = arith.addi %1, %1 : i32
+  return %3 : i32
+
+^b:
+  return %1 : i32
+}
+
+// CHECK-LABEL: op_with_region
+func.func @op_with_region() -> (i32) {
+  %0 = "test.op_with_region"() ({}) : () -> i1
+  %1 = arith.constant 5 : i32
+  cf.cond_br %0, ^a, ^b
+
+^a:
+  // CHECK-NOT: addi
+  %3 = arith.addi %1, %1 : i32
+  return %3 : i32
+
+^b:
+  return %1 : i32
+}
+
+// CHECK-LABEL: no_crash_with_different_source_type
+func.func @no_crash_with_different_source_type() {
+  // CHECK: llvm.mlir.constant(0 : index) : i64
+  %0 = llvm.mlir.constant(0 : index) : i64
+  // CHECK: vector.broadcast %[[CST:.*]] : i64 to vector<128xi64>
+  %1 = vector.broadcast %0 : i64 to vector<128xi64>
+  llvm.return
 }

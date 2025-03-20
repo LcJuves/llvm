@@ -13,11 +13,13 @@
 #include <cassert>
 #include <vector>
 
-bool test() {
+#include "test_macros.h"
+
+TEST_CONSTEXPR_CXX20 bool test() {
   std::vector<bool> vec;
   typedef std::vector<bool>::reference Ref;
   vec.push_back(true);
-  Ref ref = vec[0];
+  Ref ref  = vec[0];
   Ref ref2 = ref;
   assert(ref == ref2 && ref2);
   ref.flip();
@@ -28,6 +30,9 @@ bool test() {
 
 int main(int, char**) {
   test();
+#if TEST_STD_VER > 17
+  static_assert(test());
+#endif
 
   return 0;
 }

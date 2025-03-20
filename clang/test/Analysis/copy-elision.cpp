@@ -20,6 +20,7 @@
 #endif
 
 void clang_analyzer_eval(bool);
+void clang_analyzer_dump(int);
 
 namespace variable_functional_cast_crash {
 
@@ -153,23 +154,29 @@ public:
   void push() { v.push(this); }
 };
 
+// Two warnings on no-elide: arg v holds the address of the temporary, and we
+// are returning an object which holds v which holds the address of the temporary 
 ClassWithoutDestructor make1(AddressVector<ClassWithoutDestructor> &v) {
-  return ClassWithoutDestructor(v);
+  return ClassWithoutDestructor(v); // no-elide-warning{{Address of stack memory associated with temporary object of type 'ClassWithoutDestructor' returned to caller}}
   // no-elide-warning@-1 {{Address of stack memory associated with temporary \
-object of type 'address_vector_tests::ClassWithoutDestructor' is still \
-referred to by the stack variable 'v' upon returning to the caller}}
+object of type 'ClassWithoutDestructor' is still \
+referred to by the caller variable 'v' upon returning to the caller}}
 }
+// Two warnings on no-elide: arg v holds the address of the temporary, and we
+// are returning an object which holds v which holds the address of the temporary 
 ClassWithoutDestructor make2(AddressVector<ClassWithoutDestructor> &v) {
-  return make1(v);
+  return make1(v); // no-elide-warning{{Address of stack memory associated with temporary object of type 'ClassWithoutDestructor' returned to caller}}
   // no-elide-warning@-1 {{Address of stack memory associated with temporary \
-object of type 'address_vector_tests::ClassWithoutDestructor' is still \
-referred to by the stack variable 'v' upon returning to the caller}}
+object of type 'ClassWithoutDestructor' is still \
+referred to by the caller variable 'v' upon returning to the caller}}
 }
+// Two warnings on no-elide: arg v holds the address of the temporary, and we
+// are returning an object which holds v which holds the address of the temporary 
 ClassWithoutDestructor make3(AddressVector<ClassWithoutDestructor> &v) {
-  return make2(v);
+  return make2(v); // no-elide-warning{{Address of stack memory associated with temporary object of type 'ClassWithoutDestructor' returned to caller}}
   // no-elide-warning@-1 {{Address of stack memory associated with temporary \
-object of type 'address_vector_tests::ClassWithoutDestructor' is still \
-referred to by the stack variable 'v' upon returning to the caller}}
+object of type 'ClassWithoutDestructor' is still \
+referred to by the caller variable 'v' upon returning to the caller}}
 }
 
 void testMultipleReturns() {
@@ -192,7 +199,7 @@ void testMultipleReturns() {
 void consume(ClassWithoutDestructor c) {
   c.push();
   // expected-warning@-1 {{Address of stack memory associated with local \
-variable 'c' is still referred to by the stack variable 'v' upon returning \
+variable 'c' is still referred to by the caller variable 'v' upon returning \
 to the caller}}
 }
 
@@ -262,17 +269,17 @@ void testVariable() {
 
 struct TestCtorInitializer {
   ClassWithDestructor c;
-  TestCtorInitializer(AddressVector<ClassWithDestructor> &v)
-    : c(ClassWithDestructor(v)) {}
-  // no-elide-warning@-1 {{Address of stack memory associated with temporary \
-object of type 'address_vector_tests::ClassWithDestructor' is still referred \
-to by the stack variable 'v' upon returning to the caller}}
+  TestCtorInitializer(AddressVector<ClassWithDestructor> &refParam)
+    : c(ClassWithDestructor(refParam)) {}
 };
 
 void testCtorInitializer() {
   AddressVector<ClassWithDestructor> v;
   {
     TestCtorInitializer t(v);
+    // no-elide-warning@-1 {{Address of stack memory associated with temporary \
+object of type 'ClassWithDestructor' is still referred \
+to by the caller variable 'v' upon returning to the caller}}
     // Check if the last destructor is an automatic destructor.
     // A temporary destructor would have fired by now.
 #if ELIDE
@@ -297,24 +304,29 @@ void testCtorInitializer() {
 #endif
 }
 
-
+// Two warnings on no-elide: arg v holds the address of the temporary, and we
+// are returning an object which holds v which holds the address of the temporary
 ClassWithDestructor make1(AddressVector<ClassWithDestructor> &v) {
-  return ClassWithDestructor(v);
+  return ClassWithDestructor(v); // no-elide-warning{{Address of stack memory associated with temporary object of type 'ClassWithDestructor' returned to caller}}
   // no-elide-warning@-1 {{Address of stack memory associated with temporary \
-object of type 'address_vector_tests::ClassWithDestructor' is still referred \
-to by the stack variable 'v' upon returning to the caller}}
+object of type 'ClassWithDestructor' is still referred \
+to by the caller variable 'v' upon returning to the caller}}
 }
+// Two warnings on no-elide: arg v holds the address of the temporary, and we
+// are returning an object which holds v which holds the address of the temporary
 ClassWithDestructor make2(AddressVector<ClassWithDestructor> &v) {
-  return make1(v);
+  return make1(v); // no-elide-warning{{Address of stack memory associated with temporary object of type 'ClassWithDestructor' returned to caller}}
   // no-elide-warning@-1 {{Address of stack memory associated with temporary \
-object of type 'address_vector_tests::ClassWithDestructor' is still referred \
-to by the stack variable 'v' upon returning to the caller}}
+object of type 'ClassWithDestructor' is still referred \
+to by the caller variable 'v' upon returning to the caller}}
 }
+// Two warnings on no-elide: arg v holds the address of the temporary, and we
+// are returning an object which holds v which holds the address of the temporary
 ClassWithDestructor make3(AddressVector<ClassWithDestructor> &v) {
-  return make2(v);
+  return make2(v); // no-elide-warning{{Address of stack memory associated with temporary object of type 'ClassWithDestructor' returned to caller}}
   // no-elide-warning@-1 {{Address of stack memory associated with temporary \
-object of type 'address_vector_tests::ClassWithDestructor' is still referred \
-to by the stack variable 'v' upon returning to the caller}}
+object of type 'ClassWithDestructor' is still referred \
+to by the caller variable 'v' upon returning to the caller}}
 }
 
 void testMultipleReturnsWithDestructors() {
@@ -359,7 +371,7 @@ void testMultipleReturnsWithDestructors() {
 void consume(ClassWithDestructor c) {
   c.push();
   // expected-warning@-1 {{Address of stack memory associated with local \
-variable 'c' is still referred to by the stack variable 'v' upon returning \
+variable 'c' is still referred to by the caller variable 'v' upon returning \
 to the caller}}
 }
 
@@ -406,7 +418,7 @@ struct Foo {
 Foo make1(Foo **r) {
   return Foo(r);
   // no-elide-warning@-1 {{Address of stack memory associated with temporary \
-object of type 'address_vector_tests::Foo' is still referred to by the stack \
+object of type 'Foo' is still referred to by the caller \
 variable 'z' upon returning to the caller}}
 }
 
@@ -418,3 +430,31 @@ void test_copy_elision() {
 }
 
 } // namespace address_vector_tests
+
+namespace arg_directly_from_return_in_loop {
+
+struct Result {
+  int value;
+};
+
+Result create() {
+  return Result{10};
+}
+
+int accessValue(Result r) {
+  return r.value;
+}
+
+void test() {
+  for (int i = 0; i < 3; ++i) {
+    int v = accessValue(create());
+    if (i == 0) {
+      clang_analyzer_dump(v); // expected-warning {{10 S32b}}
+    } else {
+      clang_analyzer_dump(v); // expected-warning {{10 S32b}}
+                              // was {{reg_${{[0-9]+}}<int r.value> }} for C++11
+    }
+  }
+}
+
+} // namespace arg_directly_from_return_in_loop

@@ -13,14 +13,15 @@
 // T is an array type of known bound ([dcl.array])
 
 #include <type_traits>
+#include <cstddef>
 
 #include "test_macros.h"
 
 template <class T, bool B>
 void test_array_imp()
 {
-	static_assert( B == std::is_bounded_array<T>::value, "" );
-	static_assert( B == std::is_bounded_array_v<T>, "" );
+    static_assert( B == std::is_bounded_array<T>::value, "" );
+    static_assert( B == std::is_bounded_array_v<T>, "" );
 }
 
 template <class T, bool B>
@@ -47,21 +48,21 @@ typedef void (*FunctionPtr)();
 
 int main(int, char**)
 {
-//	Non-array types
-	test_array<void,           false>();
-	test_array<std::nullptr_t, false>();
-	test_array<int,            false>();
-	test_array<double,         false>();
-	test_array<void *,         false>();
-	test_array<int &,          false>();
-	test_array<int &&,         false>();
+    // Non-array types
+    test_array<void,           false>();
+    test_array<std::nullptr_t, false>();
+    test_array<int,            false>();
+    test_array<double,         false>();
+    test_array<void *,         false>();
+    test_array<int &,          false>();
+    test_array<int &&,         false>();
     test_array<Empty,          false>();
     test_array<Union,          false>();
     test_array<Abstract,       false>();
     test_array<Enum,           false>();
     test_array<FunctionPtr,    false>();
 
-//  Array types
+    // Array types
     test_array<char[3],           true>();
     test_array<int[0],            false>();
     test_array<char[],            false>();

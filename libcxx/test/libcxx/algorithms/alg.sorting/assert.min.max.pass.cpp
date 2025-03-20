@@ -9,8 +9,9 @@
 // <algorithm>
 
 // REQUIRES: has-unix-headers
-// UNSUPPORTED: c++03, c++11, c++14, c++17, libcpp-has-no-incomplete-ranges
-// ADDITIONAL_COMPILE_FLAGS: -D_LIBCPP_ENABLE_ASSERTIONS=1
+// UNSUPPORTED: c++03, c++11, c++14, c++17
+// UNSUPPORTED: libcpp-hardening-mode=none
+// XFAIL: libcpp-hardening-mode=debug && availability-verbose_abort-missing
 
 #include <algorithm>
 #include <array>

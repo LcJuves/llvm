@@ -4,11 +4,11 @@
 define zeroext i1 @f1(ptr %x) {
 ; CHECK-LABEL: f1:
 ; CHECK:       ## %bb.0: ## %entry
-; CHECK-NEXT:    movb (%rdi), %al
+; CHECK-NEXT:    movzbl (%rdi), %eax
 ; CHECK-NEXT:    retq
 
 entry:
-  %0 = load i8, ptr %x, align 1, !range !0
+  %0 = load i8, ptr %x, align 1, !range !0, !noundef !{}
   %tobool = trunc i8 %0 to i1
   ret i1 %tobool
 }
@@ -16,11 +16,11 @@ entry:
 define zeroext i1 @f2(ptr %x) {
 ; CHECK-LABEL: f2:
 ; CHECK:       ## %bb.0: ## %entry
-; CHECK-NEXT:    movb (%rdi), %al
+; CHECK-NEXT:    movzbl (%rdi), %eax
 ; CHECK-NEXT:    retq
 
 entry:
-  %0 = load i8, ptr %x, align 1, !range !0
+  %0 = load i8, ptr %x, align 1, !range !0, !noundef !{}
   %tobool = icmp ne i8 %0, 0
   ret i1 %tobool
 }

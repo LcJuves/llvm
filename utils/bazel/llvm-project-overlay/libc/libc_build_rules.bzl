@@ -4,84 +4,213 @@
 
 """LLVM libc starlark rules for building individual functions."""
 
-load(":platforms.bzl", "PLATFORM_CPU_ARM64", "PLATFORM_CPU_X86_64")
+load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@bazel_skylib//lib:selects.bzl", "selects")
+load(":libc_configure_options.bzl", "LIBC_CONFIGURE_OPTIONS")
+load(":libc_namespace.bzl", "LIBC_NAMESPACE")
+load(":platforms.bzl", "PLATFORM_CPU_X86_64")
 
-LIBC_ROOT_TARGET = ":libc_root"
-INTERNAL_SUFFIX = ".__internal__"
+def libc_internal_target(name):
+    return name + ".__internal__"
 
-def libc_function(name, srcs, deps = None, copts = None, **kwargs):
-    """Add target for a libc function.
+def libc_common_copts():
+    root_label = Label(":libc")
+    libc_include_path = paths.join(root_label.workspace_root, root_label.package)
+    return [
+        "-I" + libc_include_path,
+        "-I" + paths.join(libc_include_path, "include"),
+        "-DLIBC_NAMESPACE=" + LIBC_NAMESPACE,
+    ]
 
-    The libc function is eventually available as a cc_library target by name
-    "name". LLVM libc implementations of libc functions are in C++. So, this
-    rule internally generates a C wrapper for the C++ implementation and adds
-    it to the source list of the cc_library. This way, the C++ implementation
-    and the C wrapper are both available in the cc_library.
+def libc_release_copts():
+    copts = [
+        "-DLIBC_COPT_PUBLIC_PACKAGING",
+        # This is used to explicitly give public symbols "default" visibility.
+        # See src/__support/common.h for more information.
+        "-DLLVM_LIBC_FUNCTION_ATTR='[[gnu::visibility(\"default\")]]'",
+        # All other libc sources need to be compiled with "hidden" visibility.
+        "-fvisibility=hidden",
+        "-O3",
+        "-fno-builtin",
+        "-fno-lax-vector-conversions",
+        "-ftrivial-auto-var-init=pattern",
+        "-fno-omit-frame-pointer",
+        "-fstack-protector-strong",
+    ]
+
+    platform_copts = selects.with_or({
+        PLATFORM_CPU_X86_64: ["-mno-omit-leaf-frame-pointer"],
+        "//conditions:default": [],
+    })
+    return copts + platform_copts
+
+def _libc_library(name, copts = [], deps = [], local_defines = [], **kwargs):
+    """Internal macro to serve as a base for all other libc library rules.
 
     Args:
-      name: Target name. It is normally the name of the function this target is
-            for.
-      srcs: The .cpp files which contain the function implementation.
+      name: Target name.
+      copts: The special compiler options for the target.
       deps: The list of target dependencies if any.
-      copts: The list of options to add to the C++ compilation command.
-      **kwargs: Other attributes relevant for a cc_library. For example, deps.
+      local_defines: The list of target local_defines if any.
+      **kwargs: All other attributes relevant for the cc_library rule.
     """
-    deps = deps or []
-    deps.append(LIBC_ROOT_TARGET)
-    copts = copts or []
-    copts.append("-O3")
-    copts.append("-fno-builtin")
 
-    # We compile the code twice, the first target is suffixed with ".__internal__" and contains the
-    # C++ functions in the "__llvm_libc" namespace. This allows us to test the function in the
-    # presence of another libc.
     native.cc_library(
-        name = name + INTERNAL_SUFFIX,
-        srcs = srcs,
+        name = name,
+        copts = copts + libc_common_copts(),
+        local_defines = local_defines + LIBC_CONFIGURE_OPTIONS,
         deps = deps,
-        copts = copts,
         linkstatic = 1,
         **kwargs
     )
 
-    # This second target is the llvm libc C function.
-    copts.append("-DLLVM_LIBC_PUBLIC_PACKAGING")
+def _libc_library_filegroups(
+        name,
+        is_function,
+        srcs = [],
+        hdrs = [],
+        textual_hdrs = [],
+        deps = [],
+        # We're not using kwargs, but instead explicitly list all possible
+        # arguments that can be passed to libc_support_library or
+        # libc_function macros. This is done to limit the configurability
+        # and ensure the consistent and tightly controlled set of flags
+        # (see libc_common_copts and libc_release_copts above) is used to build
+        # libc code both for tests and for release configuration.
+        target_compatible_with = None,  # @unused
+        weak = False):  # @unused
+    """Internal macro to collect sources and headers required to build a library.
+    """
+
+    # filegroups created from "libc_function" macro has an extra "_fn" in their
+    # name to ensure that no other libc target can depend on libc_function.
+    prefix = name + ("_fn" if is_function else "")
+    native.filegroup(
+        name = prefix + "_srcs",
+        srcs = srcs + hdrs + [dep + "_srcs" for dep in deps],
+    )
+    native.filegroup(
+        name = prefix + "_textual_hdrs",
+        srcs = textual_hdrs + [dep + "_textual_hdrs" for dep in deps],
+    )
+
+# A convenience function which should be used to list all libc support libraries.
+# Any library which does not define a public function should be listed with
+# libc_support_library.
+def libc_support_library(name, **kwargs):
+    _libc_library(name = name, **kwargs)
+    _libc_library_filegroups(name = name, is_function = False, **kwargs)
+
+def libc_function(
+        name,
+        weak = False,
+        **kwargs):
+    """Add target for a libc function.
+
+    This macro creates an internal cc_library that can be used to test this
+    function, and creates filegroups required to include this function into
+    a release build of libc.
+
+    Args:
+      name: Target name. It is normally the name of the function this target is
+            for.
+      weak: Make the symbol corresponding to the libc function "weak".
+      **kwargs: Other attributes relevant for a cc_library. For example, deps.
+    """
+
+    # Build "internal" library with a function, the target has ".__internal__" suffix and contains
+    # C++ functions in the "LIBC_NAMESPACE" namespace. This allows us to test the function in the
+    # presence of another libc.
+    _libc_library(
+        name = libc_internal_target(name),
+        **kwargs
+    )
+
+    _libc_library_filegroups(name = name, is_function = True, **kwargs)
+
+    # TODO(PR #130327): Remove this after downstream uses are migrated to libc_release_library.
+    # This second target is the llvm libc C function with default visibility.
+    func_attrs = [
+        "LLVM_LIBC_FUNCTION_ATTR_" + name + "='LLVM_LIBC_EMPTY, [[gnu::weak]]'",
+    ] if weak else []
+
+    _libc_library(
+        name = name,
+        copts = libc_release_copts(),
+        local_defines = func_attrs,
+        **kwargs
+    )
+
+def libc_release_library(
+        name,
+        libc_functions,
+        weak_symbols = [],
+        **kwargs):
+    """Create the release version of a libc library.
+
+    Args:
+        name: Name of the cc_library target.
+        libc_functions: List of functions to include in the library. They should be
+            created by libc_function macro.
+        weak_symbols: List of function names that should be marked as weak symbols.
+        **kwargs: Other arguments relevant to cc_library.
+    """
+
+    # Combine all sources into a single filegroup to avoid repeated sources error.
+    native.filegroup(
+        name = name + "_srcs",
+        srcs = [function + "_fn_srcs" for function in libc_functions],
+    )
+
+    native.cc_library(
+        name = name + "_textual_hdr_library",
+        textual_hdrs = [function + "_fn_textual_hdrs" for function in libc_functions],
+    )
+
+    weak_attributes = [
+        "LLVM_LIBC_FUNCTION_ATTR_" + name + "='LLVM_LIBC_EMPTY, [[gnu::weak]]'"
+        for name in weak_symbols
+    ]
+
     native.cc_library(
         name = name,
-        srcs = srcs,
-        deps = deps,
-        copts = copts,
-        linkstatic = 1,
+        srcs = [":" + name + "_srcs"],
+        copts = libc_common_copts() + libc_release_copts(),
+        local_defines = weak_attributes + LIBC_CONFIGURE_OPTIONS,
+        deps = [
+            ":" + name + "_textual_hdr_library",
+        ],
         **kwargs
     )
 
 def libc_math_function(
         name,
-        specializations = None,
         additional_deps = None):
     """Add a target for a math function.
 
     Args:
       name: The name of the function.
-      specializations: List of machine specializations available for this
-                       function. Possible specializations are "generic",
-                       "aarch64" and "x86_64".
-      additional_deps: Other deps like helper cc_library targes used by the
+      additional_deps: Other deps like helper cc_library targets used by the
                        math function.
     """
     additional_deps = additional_deps or []
-    specializations = specializations or ["generic"]
-    select_map = {}
-    if "generic" in specializations:
-        select_map["//conditions:default"] = ["src/math/generic/" + name + ".cpp"]
-    if "aarch64" in specializations:
-        select_map[PLATFORM_CPU_ARM64] = ["src/math/aarch64/" + name + ".cpp"]
-    if "x86_64" in specializations:
-        select_map[PLATFORM_CPU_X86_64] = ["src/math/x86_64/" + name + ".cpp"]
+
+    #TODO(michaelrj): Fix the floating point dependencies
+    OLD_FPUTIL_DEPS = [
+        ":__support_fputil_basic_operations",
+        ":__support_fputil_division_and_remainder_operations",
+        ":__support_fputil_fenv_impl",
+        ":__support_fputil_fp_bits",
+        ":__support_fputil_hypot",
+        ":__support_fputil_manipulation_functions",
+        ":__support_fputil_nearest_integer_operations",
+        ":__support_fputil_normal_float",
+        ":__support_math_extras",
+        ":__support_fputil_except_value_utils",
+    ]
     libc_function(
         name = name,
-        srcs = selects.with_or(select_map),
+        srcs = ["src/math/generic/" + name + ".cpp"],
         hdrs = ["src/math/" + name + ".h"],
-        deps = [":__support_common", ":__support_fputil"] + additional_deps,
+        deps = [":__support_common"] + OLD_FPUTIL_DEPS + additional_deps,
     )

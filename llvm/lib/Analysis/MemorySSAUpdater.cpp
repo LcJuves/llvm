@@ -451,7 +451,7 @@ void MemorySSAUpdater::insertDef(MemoryDef *MD, bool RenameUses) {
     }
     // Existing Phi blocks may need renaming too, if an access was previously
     // optimized and the inserted Defs "covers" the Optimized value.
-    for (auto &MP : ExistingPhis) {
+    for (const auto &MP : ExistingPhis) {
       MemoryPhi *Phi = dyn_cast_or_null<MemoryPhi>(MP);
       if (Phi)
         MSSA->renamePass(Phi->getBlock(), nullptr, Visited);
@@ -462,7 +462,7 @@ void MemorySSAUpdater::insertDef(MemoryDef *MD, bool RenameUses) {
 void MemorySSAUpdater::fixupDefs(const SmallVectorImpl<WeakVH> &Vars) {
   SmallPtrSet<const BasicBlock *, 8> Seen;
   SmallVector<const BasicBlock *, 16> Worklist;
-  for (auto &Var : Vars) {
+  for (const auto &Var : Vars) {
     MemoryAccess *NewDef = dyn_cast_or_null<MemoryAccess>(Var);
     if (!NewDef)
       continue;
@@ -565,33 +565,26 @@ static MemoryAccess *onlySingleValue(MemoryPhi *MP) {
   return MA;
 }
 
-static MemoryAccess *getNewDefiningAccessForClone(MemoryAccess *MA,
-                                                  const ValueToValueMapTy &VMap,
-                                                  PhiToDefMap &MPhiMap,
-                                                  bool CloneWasSimplified,
-                                                  MemorySSA *MSSA) {
+static MemoryAccess *getNewDefiningAccessForClone(
+    MemoryAccess *MA, const ValueToValueMapTy &VMap, PhiToDefMap &MPhiMap,
+    MemorySSA *MSSA, function_ref<bool(BasicBlock *BB)> IsInClonedRegion) {
   MemoryAccess *InsnDefining = MA;
   if (MemoryDef *DefMUD = dyn_cast<MemoryDef>(InsnDefining)) {
-    if (!MSSA->isLiveOnEntryDef(DefMUD)) {
-      Instruction *DefMUDI = DefMUD->getMemoryInst();
-      assert(DefMUDI && "Found MemoryUseOrDef with no Instruction.");
-      if (Instruction *NewDefMUDI =
-              cast_or_null<Instruction>(VMap.lookup(DefMUDI))) {
-        InsnDefining = MSSA->getMemoryAccess(NewDefMUDI);
-        if (!CloneWasSimplified)
-          assert(InsnDefining && "Defining instruction cannot be nullptr.");
-        else if (!InsnDefining || isa<MemoryUse>(InsnDefining)) {
-          // The clone was simplified, it's no longer a MemoryDef, look up.
-          auto DefIt = DefMUD->getDefsIterator();
-          // Since simplified clones only occur in single block cloning, a
-          // previous definition must exist, otherwise NewDefMUDI would not
-          // have been found in VMap.
-          assert(DefIt != MSSA->getBlockDefs(DefMUD->getBlock())->begin() &&
-                 "Previous def must exist");
-          InsnDefining = getNewDefiningAccessForClone(
-              &*(--DefIt), VMap, MPhiMap, CloneWasSimplified, MSSA);
-        }
-      }
+    if (MSSA->isLiveOnEntryDef(DefMUD))
+      return DefMUD;
+
+    // If the MemoryDef is not part of the cloned region, leave it alone.
+    Instruction *DefMUDI = DefMUD->getMemoryInst();
+    assert(DefMUDI && "Found MemoryUseOrDef with no Instruction.");
+    if (!IsInClonedRegion(DefMUDI->getParent()))
+      return DefMUD;
+
+    auto *NewDefMUDI = cast_or_null<Instruction>(VMap.lookup(DefMUDI));
+    InsnDefining = NewDefMUDI ? MSSA->getMemoryAccess(NewDefMUDI) : nullptr;
+    if (!InsnDefining || isa<MemoryUse>(InsnDefining)) {
+      // The clone was simplified, it's no longer a MemoryDef, look up.
+      InsnDefining = getNewDefiningAccessForClone(
+          DefMUD->getDefiningAccess(), VMap, MPhiMap, MSSA, IsInClonedRegion);
     }
   } else {
     MemoryPhi *DefPhi = cast<MemoryPhi>(InsnDefining);
@@ -602,10 +595,10 @@ static MemoryAccess *getNewDefiningAccessForClone(MemoryAccess *MA,
   return InsnDefining;
 }
 
-void MemorySSAUpdater::cloneUsesAndDefs(BasicBlock *BB, BasicBlock *NewBB,
-                                        const ValueToValueMapTy &VMap,
-                                        PhiToDefMap &MPhiMap,
-                                        bool CloneWasSimplified) {
+void MemorySSAUpdater::cloneUsesAndDefs(
+    BasicBlock *BB, BasicBlock *NewBB, const ValueToValueMapTy &VMap,
+    PhiToDefMap &MPhiMap, function_ref<bool(BasicBlock *)> IsInClonedRegion,
+    bool CloneWasSimplified) {
   const MemorySSA::AccessList *Acc = MSSA->getBlockAccesses(BB);
   if (!Acc)
     return;
@@ -624,9 +617,9 @@ void MemorySSAUpdater::cloneUsesAndDefs(BasicBlock *BB, BasicBlock *NewBB,
         MemoryAccess *NewUseOrDef = MSSA->createDefinedAccess(
             NewInsn,
             getNewDefiningAccessForClone(MUD->getDefiningAccess(), VMap,
-                                         MPhiMap, CloneWasSimplified, MSSA),
+                                         MPhiMap, MSSA, IsInClonedRegion),
             /*Template=*/CloneWasSimplified ? nullptr : MUD,
-            /*CreationMustSucceed=*/CloneWasSimplified ? false : true);
+            /*CreationMustSucceed=*/false);
         if (NewUseOrDef)
           MSSA->insertIntoListsForBlock(NewUseOrDef, NewBB, MemorySSA::End);
       }
@@ -677,8 +670,13 @@ void MemorySSAUpdater::updateForClonedLoop(const LoopBlocksRPO &LoopBlocks,
                                            ArrayRef<BasicBlock *> ExitBlocks,
                                            const ValueToValueMapTy &VMap,
                                            bool IgnoreIncomingWithNoClones) {
-  PhiToDefMap MPhiMap;
+  SmallSetVector<BasicBlock *, 16> Blocks;
+  for (BasicBlock *BB : concat<BasicBlock *const>(LoopBlocks, ExitBlocks))
+    Blocks.insert(BB);
 
+  auto IsInClonedRegion = [&](BasicBlock *BB) { return Blocks.contains(BB); };
+
+  PhiToDefMap MPhiMap;
   auto FixPhiIncomingValues = [&](MemoryPhi *Phi, MemoryPhi *NewPhi) {
     assert(Phi && NewPhi && "Invalid Phi nodes.");
     BasicBlock *NewPhiBB = NewPhi->getBlock();
@@ -701,25 +699,10 @@ void MemorySSAUpdater::updateForClonedLoop(const LoopBlocksRPO &LoopBlocks,
         continue;
 
       // Determine incoming value and add it as incoming from IncBB.
-      if (MemoryUseOrDef *IncMUD = dyn_cast<MemoryUseOrDef>(IncomingAccess)) {
-        if (!MSSA->isLiveOnEntryDef(IncMUD)) {
-          Instruction *IncI = IncMUD->getMemoryInst();
-          assert(IncI && "Found MemoryUseOrDef with no Instruction.");
-          if (Instruction *NewIncI =
-                  cast_or_null<Instruction>(VMap.lookup(IncI))) {
-            IncMUD = MSSA->getMemoryAccess(NewIncI);
-            assert(IncMUD &&
-                   "MemoryUseOrDef cannot be null, all preds processed.");
-          }
-        }
-        NewPhi->addIncoming(IncMUD, IncBB);
-      } else {
-        MemoryPhi *IncPhi = cast<MemoryPhi>(IncomingAccess);
-        if (MemoryAccess *NewDefPhi = MPhiMap.lookup(IncPhi))
-          NewPhi->addIncoming(NewDefPhi, IncBB);
-        else
-          NewPhi->addIncoming(IncPhi, IncBB);
-      }
+      NewPhi->addIncoming(getNewDefiningAccessForClone(IncomingAccess, VMap,
+                                                       MPhiMap, MSSA,
+                                                       IsInClonedRegion),
+                          IncBB);
     }
     if (auto *SingleAccess = onlySingleValue(NewPhi)) {
       MPhiMap[Phi] = SingleAccess;
@@ -741,13 +724,13 @@ void MemorySSAUpdater::updateForClonedLoop(const LoopBlocksRPO &LoopBlocks,
       MPhiMap[MPhi] = NewPhi;
     }
     // Update Uses and Defs.
-    cloneUsesAndDefs(BB, NewBlock, VMap, MPhiMap);
+    cloneUsesAndDefs(BB, NewBlock, VMap, MPhiMap, IsInClonedRegion);
   };
 
-  for (auto BB : llvm::concat<BasicBlock *const>(LoopBlocks, ExitBlocks))
+  for (auto *BB : Blocks)
     ProcessBlock(BB);
 
-  for (auto BB : llvm::concat<BasicBlock *const>(LoopBlocks, ExitBlocks))
+  for (auto *BB : Blocks)
     if (MemoryPhi *MPhi = MSSA->getMemoryAccess(BB))
       if (MemoryAccess *NewPhi = MPhiMap.lookup(MPhi))
         FixPhiIncomingValues(MPhi, cast<MemoryPhi>(NewPhi));
@@ -766,7 +749,9 @@ void MemorySSAUpdater::updateForClonedBlockIntoPred(
   PhiToDefMap MPhiMap;
   if (MemoryPhi *MPhi = MSSA->getMemoryAccess(BB))
     MPhiMap[MPhi] = MPhi->getIncomingValueForBlock(P1);
-  cloneUsesAndDefs(BB, P1, VM, MPhiMap, /*CloneWasSimplified=*/true);
+  cloneUsesAndDefs(
+      BB, P1, VM, MPhiMap, [&](BasicBlock *CheckBB) { return BB == CheckBB; },
+      /*CloneWasSimplified=*/true);
 }
 
 template <typename Iter>
@@ -811,7 +796,7 @@ void MemorySSAUpdater::applyUpdates(ArrayRef<CFGUpdate> Updates,
   SmallVector<CFGUpdate, 4> DeleteUpdates;
   SmallVector<CFGUpdate, 4> RevDeleteUpdates;
   SmallVector<CFGUpdate, 4> InsertUpdates;
-  for (auto &Update : Updates) {
+  for (const auto &Update : Updates) {
     if (Update.getKind() == DT.Insert)
       InsertUpdates.push_back({DT.Insert, Update.getFrom(), Update.getTo()});
     else {
@@ -958,7 +943,7 @@ void MemorySSAUpdater::applyInsertUpdates(ArrayRef<CFGUpdate> Updates,
   };
   SmallDenseMap<BasicBlock *, PredInfo> PredMap;
 
-  for (auto &Edge : Updates) {
+  for (const auto &Edge : Updates) {
     BasicBlock *BB = Edge.getTo();
     auto &AddedBlockSet = PredMap[BB].Added;
     AddedBlockSet.insert(Edge.getFrom());
@@ -1003,7 +988,7 @@ void MemorySSAUpdater::applyInsertUpdates(ArrayRef<CFGUpdate> Updates,
 
   // First create MemoryPhis in all blocks that don't have one. Create in the
   // order found in Updates, not in PredMap, to get deterministic numbering.
-  for (auto &Edge : Updates) {
+  for (const auto &Edge : Updates) {
     BasicBlock *BB = Edge.getTo();
     if (PredMap.count(BB) && !MSSA->getMemoryAccess(BB))
       InsertedPhis.push_back(MSSA->createMemoryPhi(BB));
@@ -1400,7 +1385,7 @@ void MemorySSAUpdater::removeBlocks(
 }
 
 void MemorySSAUpdater::tryRemoveTrivialPhis(ArrayRef<WeakVH> UpdatedPHIs) {
-  for (auto &VH : UpdatedPHIs)
+  for (const auto &VH : UpdatedPHIs)
     if (auto *MPhi = cast_or_null<MemoryPhi>(VH))
       tryRemoveTrivialPhi(MPhi);
 }
@@ -1428,9 +1413,11 @@ void MemorySSAUpdater::changeToUnreachable(const Instruction *I) {
 
 MemoryAccess *MemorySSAUpdater::createMemoryAccessInBB(
     Instruction *I, MemoryAccess *Definition, const BasicBlock *BB,
-    MemorySSA::InsertionPlace Point) {
-  MemoryUseOrDef *NewAccess = MSSA->createDefinedAccess(I, Definition);
-  MSSA->insertIntoListsForBlock(NewAccess, BB, Point);
+    MemorySSA::InsertionPlace Point, bool CreationMustSucceed) {
+  MemoryUseOrDef *NewAccess = MSSA->createDefinedAccess(
+      I, Definition, /*Template=*/nullptr, CreationMustSucceed);
+  if (NewAccess)
+    MSSA->insertIntoListsForBlock(NewAccess, BB, Point);
   return NewAccess;
 }
 

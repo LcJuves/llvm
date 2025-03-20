@@ -68,7 +68,7 @@ int main(int, char**) {
     c1.merge(c2, std::greater<T>());
     assert(c2.empty());
 
-    for (size_t i = 0; i < 3; ++i) {
+    for (std::size_t i = 0; i < 3; ++i) {
       assert(to[i] == *io[i]);
 #if TEST_STD_VER >= 11
       assert(to[i] == ro[i].get());
@@ -109,6 +109,13 @@ int main(int, char**) {
     assert(c1 == c3);
   }
 #endif
+
+  { // LWG3088: Make sure self-merging does nothing.
+    int a[] = {5, 4, 3, 2, 1};
+    std::forward_list<int> c(std::begin(a), std::end(a));
+    c.merge(c, std::greater<int>());
+    assert(c == std::forward_list<int>(std::begin(a), std::end(a)));
+  }
 
   return 0;
 }

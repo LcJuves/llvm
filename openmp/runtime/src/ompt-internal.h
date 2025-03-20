@@ -50,6 +50,10 @@ typedef struct ompt_callbacks_active_s {
        : 0x0) |                                                                \
       ((!(info->td_flags.tiedness)) ? ompt_task_untied : 0x0) |                \
       (info->td_flags.final ? ompt_task_final : 0x0) |                         \
+      (info->td_flags.target                                                   \
+           ? ompt_task_target                                                  \
+           : (info->td_flags.tasktype ? ompt_task_explicit                     \
+                                      : ompt_task_implicit)) |                 \
       (info->td_flags.merged_if0 ? ompt_task_mergeable : 0x0)
 
 typedef struct {
@@ -76,6 +80,7 @@ typedef struct {
   ompt_data_t thread_data;
   ompt_data_t task_data; /* stored here from implicit barrier-begin until
                             implicit-task-end */
+  ompt_data_t target_task_data; /* required by target support */
   void *return_address; /* stored here on entry of runtime */
   ompt_state_t state;
   ompt_wait_id_t wait_id;
@@ -106,6 +111,8 @@ void ompt_fini(void);
 
 #define OMPT_GET_RETURN_ADDRESS(level) __builtin_return_address(level)
 #define OMPT_GET_FRAME_ADDRESS(level) __builtin_frame_address(level)
+#define OMPT_FRAME_FLAGS_APP (ompt_frame_application | ompt_frame_cfa)
+#define OMPT_FRAME_FLAGS_RUNTIME (ompt_frame_runtime | ompt_frame_cfa)
 
 int __kmp_control_tool(uint64_t command, uint64_t modifier, void *arg);
 

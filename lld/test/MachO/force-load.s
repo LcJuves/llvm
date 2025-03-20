@@ -22,7 +22,7 @@
 # REGULAR-THEN-FORCE-NOT: _foo
 ## If the -force_load comes first, then the second load will just be a no-op.
 # RUN: %lld -lSystem -force_load %t/foo.a %t/foo.a %t/test.o -o %t/test-force-then-regular
-# RUN: llvm-objdump --syms %t/test-regular-then-force | FileCheck %s --check-prefix=REGULAR-THEN-FORCE
+# RUN: llvm-objdump --syms %t/test-force-then-regular | FileCheck %s --check-prefix=FORCE-THEN-REGULAR
 # FORCE-THEN-REGULAR: _foo
 
 ## Force-loading the same path twice is fine
@@ -41,6 +41,12 @@
 # TWICE-DAG: __TEXT,archive _foo
 # TWICE-DAG: __TEXT,archive _bar
 # TWICE-DAG: __TEXT,archive _baz
+
+## Loading an empty-archive should not crash.
+# RUN: llvm-ar --format=darwin rcs %t/libEmpty.a
+# RUN: %lld -lSystem %t/test.o -force_load %t/libEmpty.a -o %t/loadEmpty.out
+# RUN: llvm-objdump --macho --syms %t/loadEmpty.out | FileCheck %s --check-prefix=EMPTY
+# EMPTY: F __TEXT,__text _main
 
 #--- archive-foo.s
 .section __TEXT,archive

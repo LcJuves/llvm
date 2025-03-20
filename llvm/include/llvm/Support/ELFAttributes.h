@@ -11,9 +11,11 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
+#include <optional>
 
 namespace llvm {
 
+// Tag to string: ELF compact build attribute section
 struct TagNameItem {
   unsigned attr;
   StringRef tagName;
@@ -21,13 +23,41 @@ struct TagNameItem {
 
 using TagNameMap = ArrayRef<TagNameItem>;
 
+// Build Attribute storage for ELF extended attribute section
+struct BuildAttributeItem {
+  enum Types : uint8_t {
+    NumericAttribute = 0,
+    TextAttribute,
+  } Type;
+  unsigned Tag;
+  unsigned IntValue;
+  std::string StringValue;
+  BuildAttributeItem(Types Ty, unsigned Tg, unsigned IV, std::string SV)
+      : Type(Ty), Tag(Tg), IntValue(IV), StringValue(std::move(SV)) {}
+};
+struct BuildAttributeSubSection {
+  StringRef Name;
+  unsigned IsOptional;
+  unsigned ParameterType;
+  SmallVector<BuildAttributeItem, 64> Content;
+};
+
+// Tag to string: ELF extended build attribute section
+struct SubsectionAndTagToTagName {
+  StringRef SubsectionName;
+  unsigned Tag;
+  StringRef TagName;
+  SubsectionAndTagToTagName(StringRef SN, unsigned Tg, StringRef TN)
+      : SubsectionName(SN), Tag(Tg), TagName(TN) {}
+};
+
 namespace ELFAttrs {
 
 enum AttrType : unsigned { File = 1, Section = 2, Symbol = 3 };
 
 StringRef attrTypeAsString(unsigned attr, TagNameMap tagNameMap,
                            bool hasTagPrefix = true);
-Optional<unsigned> attrTypeFromString(StringRef tag, TagNameMap tagNameMap);
+std::optional<unsigned> attrTypeFromString(StringRef tag, TagNameMap tagNameMap);
 
 // Magic numbers for ELF attributes.
 enum AttrMagic { Format_Version = 0x41 };

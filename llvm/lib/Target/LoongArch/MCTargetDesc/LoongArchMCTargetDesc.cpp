@@ -11,20 +11,24 @@
 //===----------------------------------------------------------------------===//
 
 #include "LoongArchMCTargetDesc.h"
-#include "LoongArchBaseInfo.h"
+#include "LoongArchELFStreamer.h"
 #include "LoongArchInstPrinter.h"
 #include "LoongArchMCAsmInfo.h"
 #include "TargetInfo/LoongArchTargetInfo.h"
+#include "llvm/MC/MCAsmBackend.h"
 #include "llvm/MC/MCAsmInfo.h"
+#include "llvm/MC/MCCodeEmitter.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCInstrAnalysis.h"
 #include "llvm/MC/MCInstrInfo.h"
+#include "llvm/MC/MCObjectWriter.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/Compiler.h"
 
 #define GET_INSTRINFO_MC_DESC
+#define ENABLE_INSTR_PREDICATE_VERIFIER
 #include "LoongArchGenInstrInfo.inc"
 
 #define GET_REGINFO_MC_DESC
@@ -49,8 +53,8 @@ static MCInstrInfo *createLoongArchMCInstrInfo() {
 
 static MCSubtargetInfo *
 createLoongArchMCSubtargetInfo(const Triple &TT, StringRef CPU, StringRef FS) {
-  if (CPU.empty())
-    CPU = TT.isArch64Bit() ? "la464" : "generic-la32";
+  if (CPU.empty() || CPU == "generic")
+    CPU = TT.isArch64Bit() ? "generic-la64" : "generic-la32";
   return createLoongArchMCSubtargetInfoImpl(TT, CPU, /*TuneCPU*/ CPU, FS);
 }
 
@@ -60,7 +64,7 @@ static MCAsmInfo *createLoongArchMCAsmInfo(const MCRegisterInfo &MRI,
   MCAsmInfo *MAI = new LoongArchMCAsmInfo(TT);
 
   // Initial state of the frame pointer is sp(r3).
-  MCRegister SP = MRI.getDwarfRegNum(LoongArch::R3, true);
+  unsigned SP = MRI.getDwarfRegNum(LoongArch::R3, true);
   MCCFIInstruction Inst = MCCFIInstruction::cfiDefCfa(nullptr, SP, 0);
   MAI->addInitialFrameState(Inst);
 
@@ -75,6 +79,19 @@ static MCInstPrinter *createLoongArchMCInstPrinter(const Triple &T,
   return new LoongArchInstPrinter(MAI, MII, MRI);
 }
 
+static MCTargetStreamer *
+createLoongArchObjectTargetStreamer(MCStreamer &S, const MCSubtargetInfo &STI) {
+  return STI.getTargetTriple().isOSBinFormatELF()
+             ? new LoongArchTargetELFStreamer(S, STI)
+             : nullptr;
+}
+
+static MCTargetStreamer *
+createLoongArchAsmTargetStreamer(MCStreamer &S, formatted_raw_ostream &OS,
+                                 MCInstPrinter *InstPrint) {
+  return new LoongArchTargetAsmStreamer(S, OS);
+}
+
 namespace {
 
 class LoongArchMCInstrAnalysis : public MCInstrAnalysis {
@@ -85,20 +102,107 @@ public:
   bool evaluateBranch(const MCInst &Inst, uint64_t Addr, uint64_t Size,
                       uint64_t &Target) const override {
     unsigned NumOps = Inst.getNumOperands();
-    if (isBranch(Inst) || Inst.getOpcode() == LoongArch::BL) {
+    if ((isBranch(Inst) && !isIndirectBranch(Inst)) ||
+        Inst.getOpcode() == LoongArch::BL) {
       Target = Addr + Inst.getOperand(NumOps - 1).getImm();
       return true;
     }
 
     return false;
   }
+
+  bool isTerminator(const MCInst &Inst) const override {
+    if (MCInstrAnalysis::isTerminator(Inst))
+      return true;
+
+    switch (Inst.getOpcode()) {
+    default:
+      return false;
+    case LoongArch::JIRL:
+      return Inst.getOperand(0).getReg() == LoongArch::R0;
+    }
+  }
+
+  bool isCall(const MCInst &Inst) const override {
+    if (MCInstrAnalysis::isCall(Inst))
+      return true;
+
+    switch (Inst.getOpcode()) {
+    default:
+      return false;
+    case LoongArch::JIRL:
+      return Inst.getOperand(0).getReg() != LoongArch::R0;
+    }
+  }
+
+  bool isReturn(const MCInst &Inst) const override {
+    if (MCInstrAnalysis::isReturn(Inst))
+      return true;
+
+    switch (Inst.getOpcode()) {
+    default:
+      return false;
+    case LoongArch::JIRL:
+      return Inst.getOperand(0).getReg() == LoongArch::R0 &&
+             Inst.getOperand(1).getReg() == LoongArch::R1;
+    }
+  }
+
+  bool isBranch(const MCInst &Inst) const override {
+    if (MCInstrAnalysis::isBranch(Inst))
+      return true;
+
+    switch (Inst.getOpcode()) {
+    default:
+      return false;
+    case LoongArch::JIRL:
+      return Inst.getOperand(0).getReg() == LoongArch::R0 &&
+             Inst.getOperand(1).getReg() != LoongArch::R1;
+    }
+  }
+
+  bool isUnconditionalBranch(const MCInst &Inst) const override {
+    if (MCInstrAnalysis::isUnconditionalBranch(Inst))
+      return true;
+
+    switch (Inst.getOpcode()) {
+    default:
+      return false;
+    case LoongArch::JIRL:
+      return Inst.getOperand(0).getReg() == LoongArch::R0 &&
+             Inst.getOperand(1).getReg() != LoongArch::R1;
+    }
+  }
+
+  bool isIndirectBranch(const MCInst &Inst) const override {
+    if (MCInstrAnalysis::isIndirectBranch(Inst))
+      return true;
+
+    switch (Inst.getOpcode()) {
+    default:
+      return false;
+    case LoongArch::JIRL:
+      return Inst.getOperand(0).getReg() == LoongArch::R0 &&
+             Inst.getOperand(1).getReg() != LoongArch::R1;
+    }
+  }
 };
 
-} // end anonymous namespace
+} // end namespace
 
 static MCInstrAnalysis *createLoongArchInstrAnalysis(const MCInstrInfo *Info) {
   return new LoongArchMCInstrAnalysis(Info);
 }
+
+namespace {
+MCStreamer *createLoongArchELFStreamer(const Triple &T, MCContext &Context,
+                                       std::unique_ptr<MCAsmBackend> &&MAB,
+                                       std::unique_ptr<MCObjectWriter> &&MOW,
+                                       std::unique_ptr<MCCodeEmitter> &&MCE) {
+  return createLoongArchELFStreamer(Context, std::move(MAB), std::move(MOW),
+                                    std::move(MCE));
+}
+} // end namespace
 
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeLoongArchTargetMC() {
   for (Target *T : {&getTheLoongArch32Target(), &getTheLoongArch64Target()}) {
@@ -110,5 +214,10 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeLoongArchTargetMC() {
     TargetRegistry::RegisterMCAsmBackend(*T, createLoongArchAsmBackend);
     TargetRegistry::RegisterMCInstPrinter(*T, createLoongArchMCInstPrinter);
     TargetRegistry::RegisterMCInstrAnalysis(*T, createLoongArchInstrAnalysis);
+    TargetRegistry::RegisterELFStreamer(*T, createLoongArchELFStreamer);
+    TargetRegistry::RegisterObjectTargetStreamer(
+        *T, createLoongArchObjectTargetStreamer);
+    TargetRegistry::RegisterAsmTargetStreamer(*T,
+                                              createLoongArchAsmTargetStreamer);
   }
 }

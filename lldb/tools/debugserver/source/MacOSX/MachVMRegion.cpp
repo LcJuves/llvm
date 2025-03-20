@@ -122,7 +122,7 @@ bool MachVMRegion::GetRegionForAddress(nub_addr_t addr) {
   m_start = addr;
   m_depth = 1024;
   mach_msg_type_number_t info_size = kRegionInfoSize;
-  static_assert(sizeof(info_size) == 4, "");
+  static_assert(sizeof(info_size) == 4);
   m_err =
       ::mach_vm_region_recurse(m_task, &m_start, &m_size, &m_depth,
                                (vm_region_recurse_info_t)&m_data, &info_size);
@@ -208,7 +208,8 @@ std::vector<std::string> MachVMRegion::GetMemoryTypes() const {
       m_data.user_tag == VM_MEMORY_MALLOC_LARGE_REUSABLE ||
       m_data.user_tag == VM_MEMORY_MALLOC_HUGE ||
       m_data.user_tag == VM_MEMORY_REALLOC ||
-      m_data.user_tag == VM_MEMORY_SBRK) {
+      m_data.user_tag == VM_MEMORY_SBRK ||
+      m_data.user_tag == VM_MEMORY_SANITIZER) {
     types.push_back("heap");
     if (m_data.user_tag == VM_MEMORY_MALLOC_TINY) {
       types.push_back("malloc-tiny");
